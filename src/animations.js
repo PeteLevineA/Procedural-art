@@ -15,6 +15,7 @@
  */
 
 import { createOLEDPetrovaParticles } from './OLEDPetrovaParticles.js';
+import { createPatrovaWormhole }     from './PatrovaWormhole.js';
 
 /**
  * @typedef {Object} AnimationEntry
@@ -63,40 +64,45 @@ export const animations = [
   {
     id: 'petrova-wormhole',
     title: 'Petrova Wormhole',
-    tagline: 'A roller-coaster ride through a blue particle tunnel, then inky black.',
+    tagline: 'A neon roller-coaster ride through a 3D particle tunnel, then black.',
     description:
-      'A seven-phase choreography on the same OLED particle engine: a handful of ' +
-      'particles drift in mostly-black space, a wave rises forward from the bottom, ' +
-      'the tunnel banks right, then left, then rushes straight at the viewer until ' +
-      'the screen is almost white — and then it suddenly stops. We land, and the ' +
-      'last few particles dissipate slowly in random directions back to pure black. ' +
-      'Bluer palette than the Scope so OLED blacks stay truly inky between bursts.',
-    tags: ['WebGL2', 'Wormhole', 'Starfield', 'OLED'],
+      'A fully 3D procedural OLED wormhole. The camera flies a parametric spline ' +
+      'through a tube of neon-blue, magenta and purple particles arranged in ' +
+      'rings, ribbons and bottom-up streamers. Instanced velocity-stretched ' +
+      'quads streak past the viewer while distant particles form the luminous ' +
+      'corridor ahead. A five-phase speed ramp — slow launch, aggressive ' +
+      'acceleration, banked peak velocity, sudden landing slam, fade to black — ' +
+      'choreographs the ride. 100% procedural: no images, sprites, or textures.',
+    tags: ['WebGL2', '3D', 'Wormhole', 'OLED'],
     fullRoute: './animations/petrova-wormhole.html',
     mount(container, { previewLoop = false } = {}) {
       const isPreview = !!previewLoop;
-      return createOLEDPetrovaParticles(container, {
-        scenario       : 'wormhole',
-        // Fewer particles than the Scope: the opening phase is mostly
-        // black, and a lower ceiling keeps OLED blacks crisp through
-        // every phase except the peak rush.
-        particleCount  : isPreview ? 1500 : 3500,
-        speed          : isPreview ? 1.15 : 1.0,
-        bloomStrength  : 1.0,
-        clumpIntensity : 1.0,
-        densityRamp    : 1.0,
-        // Shift the whole palette toward blue. The "hot" core (used in
-        // the densest clusters) is blue-white instead of magenta-white
-        // so the climactic forward rush reads as cold and electric.
-        palette        : {
-          violet : [0.35, 0.30, 1.00],
-          blue   : [0.15, 0.45, 1.00],
-          cyan   : [0.20, 0.85, 1.00],
-          hot    : [0.65, 0.80, 1.00],
+      return createPatrovaWormhole(container, {
+        // Lower particle count on gallery cards so multiple live
+        // canvases share the page comfortably.
+        particleCount       : isPreview ? 3000 : 8000,
+        tunnelRadius        : 6.0,
+        speed               : isPreview ? 1.15 : 1.0,
+        bloomStrength       : 1.0,
+        streakLength        : 0.55,
+        bottomOriginBias    : 0.45,
+        landingFadeDuration : 3.0,
+        palette : {
+          blue   : [0.20, 0.55, 1.00],
+          purple : [0.55, 0.25, 1.00],
+          magenta: [1.00, 0.25, 0.95],
+          hot    : [1.00, 1.00, 1.00],
         },
-        reducedMotion  : 'auto',
-        autoStart      : !isPreview,
-        previewLoop    : previewLoop,
+        pathCurvature : {
+          ampX  : 4.5, freqX  : 0.06,
+          ampY  : 2.5, freqY  : 0.045,
+          ampX2 : 2.0, freqX2 : 0.14,
+          ampY2 : 1.5, freqY2 : 0.11,
+          bank  : 1.1,
+        },
+        reducedMotion : 'auto',
+        autoStart     : !isPreview,
+        previewLoop   : previewLoop,
       });
     },
   },

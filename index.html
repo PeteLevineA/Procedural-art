@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>Procedural Art — A showcase of 100% procedural web animations</title>
+  <meta name="description"
+        content="A growing collection of 100% procedural, OLED-friendly web animations. No images, no sprites — every pixel is generated at runtime." />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__brand">
+      <span class="dot" aria-hidden="true"></span>
+      Procedural Art
+    </div>
+    <div class="topbar__meta">
+      A showcase · pure black · no rasters
+    </div>
+  </header>
+
+  <section class="intro">
+    <p class="intro__eyebrow">Collection · 2026 →</p>
+    <h1 class="intro__title">
+      One hundred percent procedural. <em>Zero pixels of paint.</em>
+    </h1>
+    <p class="intro__lede">
+      Each piece below is generated entirely at runtime — no images, no sprites,
+      no pre-rendered video. Hover a banner (or scroll it into view on mobile)
+      to watch the opening three seconds of the animation, then dive in for the
+      full performance.
+    </p>
+  </section>
+
+  <main id="gallery" class="gallery" aria-label="Animation showcase"></main>
+
+  <footer class="foot">
+    <div>© Procedural Art</div>
+    <div>
+      <a href="https://github.com/PeteLevineA/Procedural-art" rel="noopener">View source on GitHub</a>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { buildGallery } from './src/gallery.js';
+    buildGallery(document.getElementById('gallery'));
+  </script>
+</body>
+</html>

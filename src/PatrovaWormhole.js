@@ -1,16 +1,16 @@
 /* =====================================================================
  * PatrovaWormhole
  * ---------------------------------------------------------------------
- * A 100% procedural, OLED-friendly 3D wormhole ride implemented in raw
- * WebGL2 with custom shaders, additive blending, and instanced
- * velocity-stretched streak quads.
+ * A 100% procedural, OLED-friendly 3D wormhole *ride-through*
+ * implemented in raw WebGL2 with custom shaders, additive blending,
+ * and instanced velocity-stretched streak quads.
  *
  * This module is *intentionally* a fresh, isolated implementation: it
  * does not import or depend on `OLEDPetrovaParticles.js`. The visual
- * grammar is different — instead of a 2D curl-noise field, the camera
- * literally flies along a 3D parametric spline through a tube of
- * neon-coloured particles arranged in rings, ribbons, and bottom-up
- * streamers.
+ * grammar is: the camera flies a 3D parametric spline, AND the
+ * particles themselves stream down the spline TOWARD the camera with
+ * their own velocity — so the viewer is hurled through a volumetric
+ * river of neon plasma rather than watching a tunnel rotate.
  *
  * High-level architecture
  * -----------------------
@@ -18,50 +18,60 @@
  *     `pathPoint(s)` returns a 3D position for any scalar `s` along the
  *     wormhole. Built from a small sum of out-of-phase sinusoids so the
  *     track curves and banks like a roller-coaster — never a straight
- *     starfield. The camera advances along this path; particles live
- *     at fixed (longitudinal-offset, tube-angle, radius) positions
- *     relative to it, so the camera is moving through them in 3D space.
+ *     starfield.
  *
- *  2. Particles
- *     Stored in a single GPU-side `ArrayBuffer` of per-instance
- *     attributes (no per-frame CPU upload). The vertex shader places
- *     each particle in world space every frame from these static
- *     attributes plus the current `cameraS` uniform — that gives us a
- *     stable, recycling tube where particles "behind" the camera wrap
- *     to the front automatically.
+ *  2. Particles with their own velocity along the spline
+ *     Each particle has a static *seed* (longitudinal offset, tube
+ *     angle, radial jitter, hot/colour info) in a GPU-side
+ *     `ArrayBuffer`. Per frame the CPU integrates a single
+ *     `particleAdvance` scalar from a per-phase `particleSpeed`; the
+ *     vertex shader subtracts this from each particle's seed offset
+ *     and wraps. The result is that particles physically MOVE down
+ *     the spline toward the camera every frame, in addition to the
+ *     camera's own forward motion. Closing speed = cameraSpeed +
+ *     particleSpeed (~80 u/s at peak). When a particle wraps past the
+ *     camera it is recycled at the far end of the visible tube.
  *
- *  3. Velocity-stretched streaks
+ *  3. Pass-the-camera flare-out
+ *     As a particle approaches and crosses the camera plane, the
+ *     shader fans it radially outward and pushes it laterally so it
+ *     PHYSICALLY exits the screen through the edges rather than fading
+ *     at the camera position. Combined with the velocity-stretched
+ *     streak quad, this gives the "whipped past your face into the
+ *     periphery" feel.
+ *
+ *  4. Velocity-stretched streaks (depth-aware, NOT scale-only)
  *     Each particle is rendered as an *instanced quad*, not a point
- *     sprite. The vertex shader computes the particle's previous-frame
- *     world position from the previous `cameraS`, projects both points
- *     to NDC, and stretches the quad along that screen-space velocity
- *     vector. Length scales with speed × streakLength × depth, so near
- *     particles streak past the camera and distant particles read as a
- *     luminous corridor ahead. This is *real* depth-aware motion, not a
- *     scaled point sprite.
+ *     sprite. The vertex shader projects the particle's previous-frame
+ *     position (using the previous cameraS AND the previous
+ *     particleAdvance) and the current position, then stretches the
+ *     quad between those two screen-space points. If a particle is
+ *     ahead of the camera on one of the samples and behind on the
+ *     other (i.e. it just whipped past the viewer), the shader
+ *     extrapolates the streak off-screen along the radial-out
+ *     direction so the trail keeps drawing as the particle exits the
+ *     viewport.
  *
- *  4. Two-pass bloom-without-postprocess
+ *  5. Two-pass bloom-without-postprocess
  *     Each frame the same particle buffer is drawn twice with additive
- *     blending:
- *       - "halo" pass: large, low-alpha Gaussian — the soft bloom that
- *         wraps clusters and forms the glowing tunnel walls.
- *       - "core" pass: small, high-alpha sharp dot — the bright pinpoint
- *         at the heart of each streak, plus occasional white-hot cores.
- *     Additive accumulation of soft Gaussians is mathematically
- *     equivalent to a kernel density estimate, so dense ribbons bloom
- *     brighter than sparse regions *for free*, with no offscreen FBO.
+ *     blending — a wide "halo" Gaussian for soft bloom, and a sharp
+ *     "core" dot for the bright pinpoints. Additive accumulation of
+ *     soft Gaussians is mathematically equivalent to a kernel density
+ *     estimate, so dense ribbons bloom brighter than sparse regions
+ *     for free. Bloom intensity also rises with particle density.
  *
- *  5. Five-phase speed ramp
- *     A single `phase(t)` function returns:
- *       speed  — forward velocity along the path
- *       bank   — left/right banking strength
- *       streak — streak length multiplier
- *       alive  — global brightness (0 during the fade-to-black)
- *     The phases are: slow launch → aggressive acceleration → peak
- *     velocity → sudden landing (decel slam) → fade to black. Smooth-
- *     step easing between phases. After the fade, the cycle restarts.
+ *  6. Five-phase speed ramp
+ *     `phase(t)` returns:
+ *       speed         — camera forward velocity along the path
+ *       particleSpeed — particles' own forward velocity along the path
+ *       bank          — left/right banking strength
+ *       streak        — streak length multiplier
+ *       alive         — global brightness (0 during the fade-to-black)
+ *       turbulence    — tube wall instability
+ *     Phases: slow launch → aggressive acceleration → peak velocity →
+ *     sudden landing (decel slam) → fade to black.
  *
- *  6. Reduced motion
+ *  7. Reduced motion
  *     `prefers-reduced-motion: reduce` renders a single evolved still
  *     of the peak-velocity frame and does not animate.
  *
@@ -77,7 +87,7 @@
  * ------------------------------------------------------------------- */
 const DEFAULTS = {
   /** How many particles populate the tube. Halo + core = 2 draws each. */
-  particleCount  : 8000,
+  particleCount  : 12000,
 
   /** Average radius of the tube in world units. */
   tunnelRadius   : 6.0,
@@ -111,9 +121,10 @@ const DEFAULTS = {
   /**
    * Maximum streak length in NDC units at peak velocity. Distant
    * particles stay short even at peak; near particles take the full
-   * length.
+   * length. We allow streaks longer than the screen so particles that
+   * physically whip past the camera draw streaks exiting the viewport.
    */
-  streakLength   : 0.55,
+  streakLength   : 1.40,
 
   /**
    * Colour palette. Each entry is linear RGB in 0..1. The renderer
@@ -274,14 +285,18 @@ uniform mat4  uView;
 uniform mat4  uViewPrev;        // last frame's view, for streak direction
 uniform float uCameraS;         // current arc-length along the path
 uniform float uCameraSPrev;     // previous-frame arc-length
+uniform float uParticleAdvance;     // how far particles have moved along the spline TOWARD the camera (per-particle velocity, integrated)
+uniform float uParticleAdvancePrev; // previous-frame value, for streak velocity
 uniform float uTunnelRadius;
 uniform float uTime;
+uniform float uTimePrev;
 uniform float uBank;            // bank angle in radians at the camera
 uniform float uBankPrev;
 uniform float uStreakLength;    // 0..1 ish, multiplier on screen-space stretch
 uniform float uSizeScale;       // base point size (in NDC units) for this pass
 uniform float uIsCorePass;      // 1.0 for sharp core pass, 0.0 for halo
 uniform float uAlive;           // global brightness (0..1)
+uniform float uTurbulence;      // 0..1+, amplitude of tube wall turbulence
 uniform vec2  uViewport;        // pixel resolution
 
 uniform vec4  uPathFreqs;       // x,y,x2,y2 frequencies
@@ -326,59 +341,104 @@ void tubeFrame(float s, float bank, out vec3 T, out vec3 N, out vec3 B) {
   B = -N0 * si + B0 * c;
 }
 
-// World position of this particle for a given cameraS and bank.
-vec3 particleWorldPos(float cameraS, float bank) {
-  float sOffset = aTubeA.x;       // longitudinal offset ahead of camera
-  float theta   = aTubeA.y + aTubeB.x * uTime; // gentle theta rotation
+// World position of this particle for a given cameraS, bank, particle
+// advance and time. pAdvance is the per-particle forward velocity
+// integrated over time — it makes the particle physically MOVE along
+// the spline TOWARD the camera, on top of the camera's own forward
+// motion. The closing speed seen by the viewer is (cameraSpeed +
+// particleSpeed), which is what produces the "rollercoaster /
+// hyperspace" feel rather than a rotating tunnel.
+vec3 particleWorldPos(float cameraS, float bank, float pAdvance, float tNow) {
+  float sOffset = aTubeA.x;       // longitudinal offset (seed) ahead of camera
+  float theta   = aTubeA.y + aTubeB.x * tNow; // gentle theta rotation
   float rJ      = aTubeA.z;       // radial jitter
   float bottom  = aTubeB.w;       // 0 or 1 — bottom-origin bias flag
+  float phase   = aTubeB.y;       // per-particle phase
 
-  // Particles live "ahead" of the camera. We add their sOffset to
-  // cameraS and read pathPoint there. When sOffset goes negative
-  // (behind), wrap so the tube recycles seamlessly.
-  float sLen = 60.0; // visible length of tube ahead/behind
-  float sLocal = sOffset;
-  // wrap into [-sLen*0.25, sLen*0.75] so 1/4 of the tube extends behind
-  float lo = -sLen * 0.25;
-  sLocal = lo + mod(sLocal - lo, sLen);
+  // Visible length of tube ahead/behind. A larger BEHIND zone lets
+  // particles continue PAST the camera and streak outward off-screen
+  // before recycling, rather than vanishing at the camera plane.
+  float sLen        = 60.0;
+  float behindFrac  = 0.40;       // 40% of the tube lives behind the camera
+  float lo          = -sLen * behindFrac;
+
+  // Advect: as pAdvance grows, the particle's offset shrinks — it
+  // is moving toward the camera along the spline. mod() recycles
+  // particles that have gone too far behind back to the far end.
+  float sLocal = lo + mod((sOffset - pAdvance) - lo, sLen);
 
   float s = cameraS + sLocal;
 
-  // Bottom-bias particles emerge from below: their radius shrinks the
-  // closer they are to the camera (so the stream "spreads upward into"
-  // the corridor instead of clipping). Top-tube particles use a stable
-  // radius. Both have a small low-frequency wobble for organic ribbons.
-  float t01   = clamp(sLocal / sLen + 0.25, 0.0, 1.0); // 0 near camera, 1 far ahead
-  float wobble = 0.6 * sin(s * 0.35 + theta * 2.0) +
-                 0.4 * cos(s * 0.18 + aTubeB.y * 6.28);
+  // Approach factor: 1 when far ahead, peaks as the particle nears
+  // and crosses the camera. Used to fan particles radially outward
+  // so they exit through the screen edges instead of fading exactly
+  // at the camera position.
+  float aheadRange  = sLen * (1.0 - behindFrac); // particles ahead live in [0, sLen*0.6]
+  float t01         = clamp(sLocal / aheadRange, 0.0, 1.0); // 0 near camera, 1 far ahead
+
+  // Turbulent organic wobble — gives fluid, unstable walls instead
+  // of rigid rings. Uses several out-of-phase sinusoids so the
+  // tube cross-section never aligns to a clean circle.
+  float wobble = 0.6 * sin(s * 0.35 + theta * 2.0)
+               + 0.4 * cos(s * 0.18 + phase * 6.28)
+               + 0.5 * sin(s * 0.72 + theta * 1.3 + tNow * 0.7) * uTurbulence
+               + 0.35 * cos(s * 1.10 + phase * 9.42 - tNow * 1.1) * uTurbulence;
   float r = uTunnelRadius + rJ + wobble * 0.7;
 
   // Bottom stream: bias theta toward the lower arc and reduce radius as
   // we approach the camera so streamers fold in toward the corridor.
   if (bottom > 0.5) {
-    // pull theta toward -pi/2 (bottom)
     float bias = mix(theta, -1.5707963, 0.65);
-    theta = bias + 0.5 * sin(s * 0.4 + aTubeB.y * 4.0);
+    theta = bias + 0.5 * sin(s * 0.4 + phase * 4.0);
     r *= mix(0.55, 1.05, t01); // small near camera, larger far ahead
   }
+
+  // Near/past-camera radial flare. As the particle approaches and
+  // crosses the camera, its radial offset grows rapidly — so instead
+  // of being culled at the camera plane it physically flies outward
+  // and exits beyond the screen edges. The flare grows even more
+  // once the particle is BEHIND the camera (sLocal<0), producing the
+  // "whipped past your face" trail.
+  float closeRange = 8.0;
+  float closeAmt = clamp((closeRange - sLocal) / closeRange, 0.0, 1.0); // 0 far, 1 at camera
+  float pastAmt  = clamp(-sLocal / (sLen * behindFrac), 0.0, 1.0);      // 0 at camera, 1 fully behind
+  // closeAmt^2 ramps fast only in the last few units, so distant
+  // particles are unaffected.
+  float flare = 1.0 + closeAmt * closeAmt * 2.2 + pastAmt * 3.0;
+  r *= flare;
 
   vec3 T, N, B;
   tubeFrame(s, bank, T, N, B);
 
   vec3 c = pathPoint(s);
-  return c + (cos(theta) * N + sin(theta) * B) * r;
+  vec3 pos = c + (cos(theta) * N + sin(theta) * B) * r;
+
+  // Once the particle is behind the camera, also push it slightly
+  // further along its lateral direction (perpendicular to T) so it
+  // keeps streaming outward through screen edges rather than
+  // collapsing back onto the spline. The push grows with pastAmt.
+  if (pastAmt > 0.0) {
+    vec3 lateral = cos(theta) * N + sin(theta) * B;
+    pos += lateral * (pastAmt * pastAmt * uTunnelRadius * 1.5);
+  }
+
+  return pos;
 }
 
 void main() {
-  vec3 wp     = particleWorldPos(uCameraS,     uBank);
-  vec3 wpPrev = particleWorldPos(uCameraSPrev, uBankPrev);
+  vec3 wp     = particleWorldPos(uCameraS,     uBank,     uParticleAdvance,     uTime);
+  vec3 wpPrev = particleWorldPos(uCameraSPrev, uBankPrev, uParticleAdvancePrev, uTimePrev);
 
   vec4 clip     = uProj * uView     * vec4(wp,     1.0);
   vec4 clipPrev = uProj * uViewPrev * vec4(wpPrev, 1.0);
 
-  // Skip particles behind the camera or too close (clip.w <= 0).
-  if (clip.w <= 0.05) {
-    // Collapse the quad to a point off-screen so it discards cheaply.
+  // If BOTH the current and previous positions are behind the near
+  // plane, the particle is genuinely off-stage — collapse it. But if
+  // EITHER is still in front we want to draw a streak, even if it
+  // extends off-screen, so a particle that just whipped past the
+  // camera still leaves a luminous trail exiting the viewport.
+  float wNear = 0.05;
+  if (clip.w <= wNear && clipPrev.w <= wNear) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     vAlpha = 0.0;
     vColor = vec3(0.0);
@@ -386,38 +446,80 @@ void main() {
     return;
   }
 
-  // NDC and the screen-space velocity vector.
-  vec2 ndc     = clip.xy / clip.w;
-  vec2 ndcPrev = clipPrev.xy / max(clipPrev.w, 0.05);
-  vec2 vel     = ndc - ndcPrev;
+  // Determine which sample is the anchor (in front of camera) and
+  // synthesise the other one so we always have two valid screen-space
+  // points to stretch the streak quad between.
+  vec2 ndc, ndcPrev;
+  float anchorW;        // depth used for sprite sizing
+  float extrapolated = 0.0; // 1.0 if this particle is in the "just passed" state
 
-  // Cap stretch and scale by streak length. Distance falloff: nearby
-  // particles (small clip.w) have large screen velocity and streak the
-  // most; distant ones (large clip.w) barely move on screen and read
-  // as luminous pinpoints.
+  if (clip.w > wNear && clipPrev.w > wNear) {
+    // Normal case: both in front.
+    ndc     = clip.xy     / clip.w;
+    ndcPrev = clipPrev.xy / clipPrev.w;
+    anchorW = clip.w;
+  } else if (clip.w <= wNear) {
+    // Current sample crossed behind the camera this frame.
+    // Anchor at the previous position and extrapolate the current
+    // sample by pushing radially outward from screen origin — this
+    // is the "exiting through the screen edge" tail.
+    ndcPrev = clipPrev.xy / clipPrev.w;
+    vec2 outward = length(ndcPrev) > 1e-3 ? normalize(ndcPrev) : vec2(1.0, 0.0);
+    ndc = ndcPrev + outward * 2.5; // far off-screen
+    anchorW = clipPrev.w;
+    extrapolated = 1.0;
+  } else {
+    // Previous sample was behind, current is in front (a freshly
+    // recycled particle materialising near camera). Anchor at the
+    // current sample; back-extrapolate prev to the same direction so
+    // the streak length collapses (no fake comet on spawn).
+    ndc = clip.xy / clip.w;
+    ndcPrev = ndc;
+    anchorW = clip.w;
+  }
+
+  vec2 vel = ndc - ndcPrev;
+
+  // Cap stretch and scale by streak length. Nearby particles (small
+  // anchorW) have large screen velocity and streak the most; distant
+  // ones (large anchorW) barely move on screen and read as luminous
+  // pinpoints.
   float velLen = length(vel);
   float maxStreak = uStreakLength * (uIsCorePass > 0.5 ? 0.7 : 1.0);
   float streakAmt = clamp(velLen, 0.0, maxStreak);
   vec2  streakDir = velLen > 1e-5 ? vel / velLen : vec2(1.0, 0.0);
   vec2  perpDir   = vec2(-streakDir.y, streakDir.x);
 
-  // Base sprite size scales with 1/clip.w so faraway particles look
+  // Base sprite size scales with 1/anchorW so faraway particles look
   // small. We also widen the halo by uSizeScale.
   float aspect = uViewport.x / max(uViewport.y, 1.0);
-  float baseSize = uSizeScale / max(clip.w, 0.5);
+  float baseSize = uSizeScale / max(anchorW, 0.5);
 
-  // Build the corner offset in NDC.
-  // aCorner.x ∈ [-1, +1] is the *along-streak* axis.
-  // aCorner.y ∈ [-1, +1] is the *across-streak* axis.
-  vec2 offset = streakDir * (aCorner.x * (baseSize + streakAmt))
-              + perpDir   * (aCorner.y * baseSize);
-  // Anisotropic correction so the *across-streak* axis stays circular
-  // in pixels regardless of viewport aspect. The along-streak axis is
-  // intentionally left in NDC so streak lengths read consistently.
-  offset.y *= aspect;
+  // Streak quad: interpolate between the streak tail and head along
+  // aCorner.x. The head is the current sample's screen position; the
+  // tail is either the previous sample (for "just passed" particles
+  // whose streak grows from where the particle actually was) or a
+  // synthetic tail offset behind the head by streakAmt along the
+  // motion direction (normal case).
+  //   aCorner.x ∈ [-1, +1] : -1 = tail, +1 = head
+  //   aCorner.y ∈ [-1, +1] : across-streak axis
+  vec2 head = ndc;
+  vec2 tail = (extrapolated > 0.5)
+    ? ndcPrev
+    : (ndc - streakDir * streakAmt);
+  // Slightly overshoot the head past the current position so the
+  // brightest pinpoint reads as the leading edge.
+  head += streakDir * baseSize;
 
-  vec2 finalNDC = ndc + offset;
-  gl_Position = vec4(finalNDC * clip.w, clip.z, clip.w);
+  float along01 = (aCorner.x + 1.0) * 0.5; // 0..1
+  vec2 baseNDC  = mix(tail, head, along01);
+  vec2 perp     = perpDir * (aCorner.y * baseSize);
+  // Anisotropic correction so the across-streak axis stays circular
+  // in pixels regardless of viewport aspect.
+  perp.y *= aspect;
+  vec2 finalNDC = baseNDC + perp;
+
+  gl_Position = vec4(finalNDC * anchorW, clip.z, anchorW);
 
   vUV = aCorner; // pass corner as UV so frag can mask the Gaussian
 
@@ -425,7 +527,7 @@ void main() {
   // Depth-based brightness: things close to the camera burn brighter
   // for the "near streak past your face" feel, distant tunnel walls
   // fade toward black to give the corridor a real vanishing point.
-  float dist = clip.w;
+  float dist = anchorW;
   float nearF = smoothstep(35.0, 2.0, dist);   // 1 near, 0 far
   float farF  = smoothstep(60.0, 10.0, dist);  // 1 well-inside the tube
 
@@ -438,6 +540,11 @@ void main() {
   // Streak makes the core pass brighter (denser additive contribution).
   float alpha = (uIsCorePass > 0.5 ? 0.95 : 0.18) * farF;
   alpha *= mix(0.5, 1.0, nearF);
+  // Extrapolated (just-passed) streaks fade as they extend off-screen
+  // so we don't get a hard edge at the viewport boundary.
+  if (extrapolated > 0.5) {
+    alpha *= 0.55;
+  }
   alpha *= uAlive;
 
   vColor = col * (uIsCorePass > 0.5 ? 1.0 : 0.55);
@@ -535,23 +642,27 @@ export function createPatrovaWormhole(container, userOpts = {}) {
     aTubeB    : gl.getAttribLocation(program, 'aTubeB'),
     aColor    : gl.getAttribLocation(program, 'aColor'),
 
-    uProj         : gl.getUniformLocation(program, 'uProj'),
-    uView         : gl.getUniformLocation(program, 'uView'),
-    uViewPrev     : gl.getUniformLocation(program, 'uViewPrev'),
-    uCameraS      : gl.getUniformLocation(program, 'uCameraS'),
-    uCameraSPrev  : gl.getUniformLocation(program, 'uCameraSPrev'),
-    uTunnelRadius : gl.getUniformLocation(program, 'uTunnelRadius'),
-    uTime         : gl.getUniformLocation(program, 'uTime'),
-    uBank         : gl.getUniformLocation(program, 'uBank'),
-    uBankPrev     : gl.getUniformLocation(program, 'uBankPrev'),
-    uStreakLength : gl.getUniformLocation(program, 'uStreakLength'),
-    uSizeScale    : gl.getUniformLocation(program, 'uSizeScale'),
-    uIsCorePass   : gl.getUniformLocation(program, 'uIsCorePass'),
-    uAlive        : gl.getUniformLocation(program, 'uAlive'),
-    uViewport     : gl.getUniformLocation(program, 'uViewport'),
-    uPathFreqs    : gl.getUniformLocation(program, 'uPathFreqs'),
-    uPathAmps     : gl.getUniformLocation(program, 'uPathAmps'),
-    uBloomStrength: gl.getUniformLocation(program, 'uBloomStrength'),
+    uProj                : gl.getUniformLocation(program, 'uProj'),
+    uView                : gl.getUniformLocation(program, 'uView'),
+    uViewPrev            : gl.getUniformLocation(program, 'uViewPrev'),
+    uCameraS             : gl.getUniformLocation(program, 'uCameraS'),
+    uCameraSPrev         : gl.getUniformLocation(program, 'uCameraSPrev'),
+    uParticleAdvance     : gl.getUniformLocation(program, 'uParticleAdvance'),
+    uParticleAdvancePrev : gl.getUniformLocation(program, 'uParticleAdvancePrev'),
+    uTunnelRadius        : gl.getUniformLocation(program, 'uTunnelRadius'),
+    uTime                : gl.getUniformLocation(program, 'uTime'),
+    uTimePrev            : gl.getUniformLocation(program, 'uTimePrev'),
+    uBank                : gl.getUniformLocation(program, 'uBank'),
+    uBankPrev            : gl.getUniformLocation(program, 'uBankPrev'),
+    uStreakLength        : gl.getUniformLocation(program, 'uStreakLength'),
+    uSizeScale           : gl.getUniformLocation(program, 'uSizeScale'),
+    uIsCorePass          : gl.getUniformLocation(program, 'uIsCorePass'),
+    uAlive               : gl.getUniformLocation(program, 'uAlive'),
+    uTurbulence          : gl.getUniformLocation(program, 'uTurbulence'),
+    uViewport            : gl.getUniformLocation(program, 'uViewport'),
+    uPathFreqs           : gl.getUniformLocation(program, 'uPathFreqs'),
+    uPathAmps            : gl.getUniformLocation(program, 'uPathAmps'),
+    uBloomStrength       : gl.getUniformLocation(program, 'uBloomStrength'),
   };
 
   /* ----------------- Geometry: a unit quad ----------------- */
@@ -757,67 +868,81 @@ export function createPatrovaWormhole(container, userOpts = {}) {
       t = tSec % T_TOTAL;
     }
 
-    const peakSpeed = 24.0; // world units per second along the path
-    let speed, streak, alive, density, bank;
+    const peakCamSpeed      = 24.0;  // camera arc-length speed (units/sec)
+    const peakParticleSpeed = 56.0;  // additional per-particle speed along the spline
+                                     // → peak closing speed ≈ 80 u/s
+    let speed, particleSpeed, streak, alive, density, bank, turbulence;
 
     if (t < T_LAUNCH) {
-      // Phase 1: slow entry (0–6 s). Start sparse and mostly black; the
-      // corridor is just a hint of structure with a few scattered neons.
+      // Phase 1: slow entry (0–6 s). Sparse, mostly black; only a hint
+      // of structure with a few scattered neons drifting toward you.
       const u = t / Math.max(0.0001, T_LAUNCH);
       const e = smoothstep(0.0, 1.0, u);
-      speed   = 0.6 + e * 4.7;
-      streak  = 0.04 + e * 0.11;
-      alive   = 0.20 + e * 0.55;   // open in near-black, brighten gently
-      density = 0.18 + e * 0.55;   // very few visible particles at t=0
-      bank    = e * 0.25;          // very gentle
+      speed         = 0.6 + e * 4.7;
+      particleSpeed = 1.2 + e * 7.0;
+      streak        = 0.04 + e * 0.14;
+      alive         = 0.20 + e * 0.55;
+      density       = 0.18 + e * 0.55;
+      bank          = e * 0.25;
+      turbulence    = 0.15 + e * 0.25;
     } else if (t < T_ACCEL) {
       // Phase 2: aggressive acceleration (6–18 s). Speed and density
-      // both ramp hard; banking awakens; streaks lengthen.
+      // both ramp hard; banking awakens; streaks lengthen; particles
+      // begin to whip past the camera.
       const u = (t - T_LAUNCH) / Math.max(0.0001, ramp.accel);
       const e = smoothstep(0.0, 1.0, u);
-      speed   = 5.3 + e * (peakSpeed - 5.3);
-      streak  = 0.15 + e * 0.60;
-      alive   = 0.75 + e * 0.25;
-      density = 0.73 + e * 0.27;
-      bank    = 0.25 + e * 0.75;
+      speed         = 5.3 + e * (peakCamSpeed - 5.3);
+      particleSpeed = 8.2 + e * (peakParticleSpeed - 8.2);
+      streak        = 0.18 + e * 0.70;
+      alive         = 0.75 + e * 0.25;
+      density       = 0.73 + e * 0.27;
+      bank          = 0.25 + e * 0.75;
+      turbulence    = 0.40 + e * 0.55;
     } else if (t < T_PEAK) {
-      // Phase 3: peak-speed tunnel ride (18–25 s). Dense neon storm.
+      // Phase 3: peak-velocity tunnel ride (18–25 s). Dense neon storm
+      // — particles violently passing the viewer.
       const u = (t - T_ACCEL) / Math.max(0.0001, ramp.peak);
-      speed   = peakSpeed * (0.95 + 0.05 * Math.sin(u * 5.0));
-      streak  = 0.78;
-      alive   = 1.0;
-      density = 1.0;
-      bank    = 1.0 + 0.5 * Math.sin(u * 3.1);
+      const wobble = 0.05 * Math.sin(u * 5.0);
+      speed         = peakCamSpeed      * (0.95 + wobble);
+      particleSpeed = peakParticleSpeed * (0.95 + wobble);
+      streak        = 0.92;
+      alive         = 1.0;
+      density       = 1.0;
+      bank          = 1.0 + 0.5 * Math.sin(u * 3.1);
+      turbulence    = 1.05;
     } else if (t < T_LAND) {
-      // Phase 4: sudden landing slam (25–28 s). Stop spawning new
-      // particles — density falls quickly — while existing streaks
+      // Phase 4: sudden landing slam (25–28 s). Forward speed collapses
+      // for both the camera and the particles; existing streaks
       // decelerate. Quintic falloff makes the stop feel violent.
       const u = (t - T_PEAK) / Math.max(0.0001, ramp.landing);
       const e = smoothstep(0.0, 1.0, u);
       const eFast = 1 - Math.pow(1 - e, 5);
-      speed   = peakSpeed * (1 - eFast);
-      streak  = 0.78 * (1 - eFast);
-      alive   = 1.0 - 0.25 * e;
-      density = 1.0 - 0.85 * e;    // no new spawns as we land
-      bank    = (1.0 - e) * (1.0 + 0.5 * Math.sin(u * 3.1));
+      speed         = peakCamSpeed      * (1 - eFast);
+      particleSpeed = peakParticleSpeed * (1 - eFast);
+      streak        = 0.92 * (1 - eFast);
+      alive         = 1.0 - 0.25 * e;
+      density       = 1.0 - 0.85 * e;
+      bank          = (1.0 - e) * (1.0 + 0.5 * Math.sin(u * 3.1));
+      turbulence    = 1.05 * (1 - eFast);
     } else if (t < T_FADE) {
-      // Phase 5: dissipate to black (28–30 s). No forward motion; the
-      // remaining particles fade out into pure OLED black.
+      // Phase 5: dissipate (28–30 s). Remaining particles drift
+      // outward and fade into pure OLED black.
       const u = (t - T_LAND) / Math.max(0.0001, ramp.fade);
       const e = smoothstep(0.0, 1.0, u);
-      speed   = 0.4 * (1 - e);
-      streak  = 0.04 * (1 - e);
-      alive   = (1 - e) * 0.6;
-      density = 0.15 * (1 - e);
-      bank    = 0.0;
+      speed         = 0.4 * (1 - e);
+      particleSpeed = 0.6 * (1 - e);
+      streak        = 0.04 * (1 - e);
+      alive         = (1 - e) * 0.6;
+      density       = 0.15 * (1 - e);
+      bank          = 0.0;
+      turbulence    = 0.10 * (1 - e);
     } else {
-      // Safety branch: with the default 30 s ramp `hold` is 0 so this
-      // is unreachable, but a non-zero `hold` override would land here
-      // as a fully black pause before the loop restarts.
-      speed = 0.0; streak = 0.0; alive = 0.0; density = 0.0; bank = 0.0;
+      // Safety branch (unreachable with default 30 s ramp).
+      speed = 0.0; particleSpeed = 0.0; streak = 0.0;
+      alive = 0.0; density = 0.0; bank = 0.0; turbulence = 0.0;
     }
 
-    return { speed, streak, alive, density, bank };
+    return { speed, particleSpeed, streak, alive, density, bank, turbulence };
   }
 
   /* ----------------- State ----------------- */
@@ -825,9 +950,16 @@ export function createPatrovaWormhole(container, userOpts = {}) {
   let wantsRunning = false;
   let mode = resolveMotionMode();
   let t = 0;
+  let tPrev = 0;
   let lastFrame = 0;
   let cameraS = 0;
   let cameraSPrev = 0;
+  // Per-particle forward advance along the spline (integrated from
+  // particleSpeed each frame). This is what makes the particles
+  // physically MOVE down the spline toward the camera, in addition to
+  // the camera's own forward motion. Closing speed = cameraS' + particleAdvance'.
+  let particleAdvance = 0;
+  let particleAdvancePrev = 0;
   let bankPrev = 0;
 
   const proj      = new Float32Array(16);
@@ -884,12 +1016,15 @@ export function createPatrovaWormhole(container, userOpts = {}) {
 
     // Reduced motion 'slow' just scales dt down.
     const effectiveDt = mode === 'slow' ? dt * 0.1 : dt;
+    tPrev = t;
     t += effectiveDt;
 
     const ph = phase(t);
 
-    cameraSPrev = cameraS;
-    cameraS    += ph.speed * effectiveDt;
+    cameraSPrev         = cameraS;
+    cameraS            += ph.speed * effectiveDt;
+    particleAdvancePrev = particleAdvance;
+    particleAdvance    += ph.particleSpeed * effectiveDt;
 
     render(ph);
     raf = requestAnimationFrame(frame);
@@ -918,16 +1053,23 @@ export function createPatrovaWormhole(container, userOpts = {}) {
     gl.uniformMatrix4fv(loc.uProj, false, proj);
     gl.uniformMatrix4fv(loc.uView, false, view);
     gl.uniformMatrix4fv(loc.uViewPrev, false, viewPrev);
-    gl.uniform1f(loc.uCameraS,     cameraS);
-    gl.uniform1f(loc.uCameraSPrev, cameraSPrev);
+    gl.uniform1f(loc.uCameraS,             cameraS);
+    gl.uniform1f(loc.uCameraSPrev,         cameraSPrev);
+    gl.uniform1f(loc.uParticleAdvance,     particleAdvance);
+    gl.uniform1f(loc.uParticleAdvancePrev, particleAdvancePrev);
     gl.uniform1f(loc.uTunnelRadius, opts.tunnelRadius);
     gl.uniform1f(loc.uTime,        t);
+    gl.uniform1f(loc.uTimePrev,    tPrev);
     gl.uniform1f(loc.uBank,        ph.bank);
     gl.uniform1f(loc.uBankPrev,    bankPrev);
     gl.uniform1f(loc.uStreakLength, ph.streak * opts.streakLength);
     gl.uniform1f(loc.uAlive,       ph.alive * ph.density);
+    gl.uniform1f(loc.uTurbulence,  ph.turbulence);
     gl.uniform2f(loc.uViewport,    w, h);
-    gl.uniform1f(loc.uBloomStrength, opts.bloomStrength);
+    // Bloom intensity scales with density (more particles → denser
+    // additive accumulation → brighter plasma clumps).
+    gl.uniform1f(loc.uBloomStrength,
+      opts.bloomStrength * (0.85 + 0.25 * ph.density));
 
     const pc = opts.pathCurvature;
     gl.uniform4f(loc.uPathFreqs, pc.freqX, pc.freqY, pc.freqX2, pc.freqY2);
@@ -958,8 +1100,11 @@ export function createPatrovaWormhole(container, userOpts = {}) {
     const stillT = T_LAUNCH + ramp.accel + ramp.peak * 0.5;
     const ph = phase(stillT);
     t = stillT;
+    tPrev = stillT - (1 / 60);
     cameraS = ph.speed * stillT * 0.4;
     cameraSPrev = cameraS - ph.speed * (1 / 60);
+    particleAdvance     = ph.particleSpeed * stillT * 0.4;
+    particleAdvancePrev = particleAdvance - ph.particleSpeed * (1 / 60);
     bankPrev = ph.bank;
     render(ph);
   }
@@ -1025,8 +1170,11 @@ export function createPatrovaWormhole(container, userOpts = {}) {
     /** Restart the timeline from t=0. */
     reset() {
       t = 0;
+      tPrev = 0;
       cameraS = 0;
       cameraSPrev = 0;
+      particleAdvance = 0;
+      particleAdvancePrev = 0;
       bankPrev = 0;
       renderStaticFrame();
     },

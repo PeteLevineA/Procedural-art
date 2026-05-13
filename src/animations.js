@@ -80,11 +80,11 @@ export const animations = [
       return createPatrovaWormhole(container, {
         // Lower particle count on gallery cards so multiple live
         // canvases share the page comfortably.
-        particleCount       : isPreview ? 3000 : 8000,
+        particleCount       : isPreview ? 4500 : 12000,
         tunnelRadius        : 6.0,
         speed               : isPreview ? 1.15 : 1.0,
         bloomStrength       : 1.0,
-        streakLength        : 0.55,
+        streakLength        : 1.40,
         bottomOriginBias    : 0.45,
         landingFadeDuration : 3.0,
         palette : {

@@ -229,6 +229,19 @@ const DEFAULTS = {
   // every N seconds so the opening phase of the animation plays in a
   // tight, modular loop. Set to `false` (default) for full playback.
   previewLoop     : false,
+  // Choreography selector. 'scope' is the original Petrova Scope
+  // (right-edge spawn, curl-noise turbulence drift to the left).
+  // 'wormhole' is the Petrova Wormhole roller-coaster timeline:
+  //   1. drifting particles in mostly-black space
+  //   2. a wave of particles rising from the bottom + coming forward
+  //   3. a wormhole tunnel emerging from the front+right
+  //   4. tunnel sweeps to front+left
+  //   5. straight-at-the-viewer rush, screen nearly white
+  //   6. abrupt stop ("we land")
+  //   7. a few particles drift away in random directions, fading out
+  // Particle positions are projected radially from a phase-driven
+  // vanishing point so each phase reads as travel through a tunnel.
+  scenario        : 'scope',
 };
 
 /**
@@ -374,11 +387,106 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
     out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
   }
 
+  // Shared scratch buffer for pickPaletteColor — used by both spawn paths.
+  const _tmp = [0, 0, 0];
+
+  // ----- Wormhole choreography -----
+  // The Petrova Wormhole scenario is a seven-phase, looping roller
+  // coaster:
+  //   1. Idle drift (mostly black, a few particles floating).
+  //   2. Wave from the bottom rising upward + forward.
+  //   3. Tunnel emerges from the front + right (we bank right).
+  //   4. Tunnel sweeps to the front + left (we bank left).
+  //   5. Straight at the viewer; screen ramps toward white.
+  //   6. Sudden stop — the forward rush halts ("we land").
+  //   7. A few particles dissipate in random directions, slowly,
+  //      and we return to inky black.
+  // Each phase returns a vanishing point in fractional screen coords,
+  // a target live-particle fraction, and a per-second radial growth
+  // rate. Per-particle motion in 'forward' phases is a radial expansion
+  // from the stored vanishing point, giving the classic starfield /
+  // wormhole "coming toward you" cue without any real 3D math.
+  const WORMHOLE_CYCLE_SECONDS = 50;
+  function wormholePhase(tt) {
+    const tc = tt % WORMHOLE_CYCLE_SECONDS;
+    if (tc < 5) {
+      return { mode: 'drift', live: 0.06, vpx: 0.5, vpy: 0.5, fwd: 0.0 };
+    }
+    if (tc < 14) {
+      const u = (tc - 5) / 9;
+      return { mode: 'forward', live: 0.10 + u * 0.22, vpx: 0.5,  vpy: 0.92, fwd: 0.35 + u * 0.45 };
+    }
+    if (tc < 21) {
+      const u = (tc - 14) / 7;
+      return { mode: 'forward', live: 0.32 + u * 0.22, vpx: 0.85, vpy: 0.5,  fwd: 0.85 + u * 0.4 };
+    }
+    if (tc < 28) {
+      const u = (tc - 21) / 7;
+      return { mode: 'forward', live: 0.54 + u * 0.22, vpx: 0.15, vpy: 0.5,  fwd: 1.25 + u * 0.45 };
+    }
+    if (tc < 37) {
+      const u = (tc - 28) / 9;
+      return { mode: 'forward', live: 0.76 + u * 0.24, vpx: 0.5,  vpy: 0.5,  fwd: 1.7 + u * 1.4 };
+    }
+    if (tc < 38.5) {
+      return { mode: 'stop',      live: 0.0,  vpx: 0.5, vpy: 0.5, fwd: 0.0 };
+    }
+    return   { mode: 'dissipate', live: 0.05, vpx: 0.5, vpy: 0.5, fwd: 0.0 };
+  }
+
+  function spawnWormhole(i, tt, forceFull) {
+    const ph = wormholePhase(tt);
+    const vpxPx = ph.vpx * W;
+    const vpyPx = ph.vpy * H;
+    const angle = Math.random() * Math.PI * 2;
+
+    if (forceFull || ph.mode === 'drift' || ph.mode === 'dissipate') {
+      // Scatter across the whole screen for drift / dissipate / boot-up.
+      px[i] = Math.random() * W;
+      py[i] = Math.random() * H;
+    } else {
+      // Forward phases: start very close to the vanishing point so the
+      // per-frame radial growth flings the particle outward through the
+      // viewport, the visual signature of "tunneling forward".
+      const r0 = 4 + Math.pow(Math.random(), 0.5) * Math.max(W, H) * 0.06;
+      px[i] = vpxPx + Math.cos(angle) * r0;
+      py[i] = vpyPx + Math.sin(angle) * r0;
+    }
+
+    if (ph.mode === 'dissipate') {
+      // Re-use vx/vy as a slow random 2D drift velocity (px / second).
+      const sp = 18 + Math.random() * 30;
+      vx[i] = Math.cos(angle) * sp;
+      vy[i] = Math.sin(angle) * sp;
+    } else {
+      // Otherwise vx/vy store the particle's vanishing-point anchor so
+      // radial growth is stable even after the global phase moves on.
+      vx[i] = vpxPx;
+      vy[i] = vpyPx;
+    }
+
+    // Start visually distant — small depth/size — so particles appear
+    // to emerge from far away as they're flung forward.
+    depth[i] = 0.05 + Math.random() * 0.1;
+    age[i] = 0;
+    // Lifetimes are tuned so that the renderer's lifeFade (which fades
+    // in over the first 25% and out over the last 25% of life) creates
+    // a smooth emergence without lingering ghosts after the particle's
+    // primary kill condition (depth saturation or off-screen) triggers.
+    if (ph.mode === 'dissipate')   life[i] = 4 + Math.random() * 3;
+    else if (ph.mode === 'drift')  life[i] = 6 + Math.random() * 4;
+    else                           life[i] = 3 + Math.random() * 1.5;
+
+    pickPaletteColor(_tmp, i + (Math.random() * 1e6) | 0);
+    baseR[i] = _tmp[0]; baseG[i] = _tmp[1]; baseB[i] = _tmp[2];
+    jitter[i] = 0.6 + Math.random() * 0.8;
+  }
+
   // Spawn one particle. `t` is global seconds (used for timeline & spawn bias).
   // `forceFull` = true ignores right-bias and fills anywhere (used at startup
   // so the screen isn't an empty rectangle for the first second).
-  const _tmp = [0, 0, 0];
   function spawn(i, t, forceFull) {
+    if (opts.scenario === 'wormhole') return spawnWormhole(i, t, forceFull);
     // Bias spawn position toward right edge; relax over time.
     // timelineBias: 1.0 at t=0 → ~0.25 once we're well into phase 3.
     const timelineBias = Math.max(0.25, opts.rightSpawnBias - t * 0.025);
@@ -470,7 +578,103 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
   let rafId = 0;
   let running = false;
 
+  // Track wormhole phase between frames so we can detect transitions
+  // (e.g. entering 'stop' compresses every live particle's remaining
+  // lifetime so the rush cuts out cleanly).
+  let _prevWormholeMode = 'drift';
+
+  function stepWormhole(dt) {
+    const ph = wormholePhase(t);
+    const targetLive = Math.floor(N * ph.live);
+
+    // Phase-transition cleanup: when entering 'stop', collapse remaining
+    // lifetime so existing particles fade out within ~0.6s.
+    if (ph.mode === 'stop' && _prevWormholeMode !== 'stop') {
+      for (let i = 0; i < N; i++) {
+        if (age[i] < life[i]) {
+          const remaining = Math.min(life[i] - age[i], 0.6);
+          life[i] = age[i] + remaining;
+        }
+      }
+    }
+    _prevWormholeMode = ph.mode;
+
+    let live = 0;
+    if (ph.mode === 'forward') {
+      // Radial expansion from each particle's stored vanishing point —
+      // px/py grow away from (vx, vy), depth grows toward the camera.
+      const growth = Math.exp(ph.fwd * dt * opts.speed);
+      const wobbleMag = 18 * opts.speed;
+      const offMargin = Math.max(W, H) * 0.6;
+      for (let i = 0; i < N; i++) {
+        if (age[i] >= life[i]) continue;
+        const dx = px[i] - vx[i];
+        const dy = py[i] - vy[i];
+        const [wx, wy] = curl(px[i], py[i], t);
+        px[i] = vx[i] + dx * growth + wx * wobbleMag * dt;
+        py[i] = vy[i] + dy * growth + wy * wobbleMag * dt;
+        depth[i] = Math.min(1, depth[i] * growth);
+        age[i] += dt;
+        if (
+          depth[i] >= 0.98 ||
+          px[i] < -offMargin || px[i] > W + offMargin ||
+          py[i] < -offMargin || py[i] > H + offMargin
+        ) {
+          age[i] = life[i];
+        } else {
+          live++;
+        }
+      }
+    } else if (ph.mode === 'dissipate') {
+      // Slow random drift, gentle swirl, shrink + fade. No forward motion.
+      for (let i = 0; i < N; i++) {
+        if (age[i] >= life[i]) continue;
+        const [cx, cy] = curl(px[i], py[i], t);
+        px[i] += (vx[i] + cx * 25) * dt;
+        py[i] += (vy[i] + cy * 25) * dt;
+        depth[i] = Math.max(0.02, depth[i] - 0.05 * dt);
+        age[i] += dt;
+        if (px[i] < -40 || px[i] > W + 40 || py[i] < -40 || py[i] > H + 40) {
+          age[i] = life[i];
+        } else {
+          live++;
+        }
+      }
+    } else {
+      // drift / stop: gentle curl-noise advection (or none, during stop).
+      const driftSpeed = ph.mode === 'stop' ? 0 : 35;
+      for (let i = 0; i < N; i++) {
+        if (age[i] >= life[i]) continue;
+        if (driftSpeed > 0) {
+          const [cx, cy] = curl(px[i], py[i], t);
+          px[i] += cx * driftSpeed * opts.speed * dt;
+          py[i] += cy * driftSpeed * opts.speed * dt;
+        }
+        age[i] += dt;
+        if (px[i] < -40 || px[i] > W + 40 || py[i] < -40 || py[i] > H + 40) {
+          age[i] = life[i];
+        } else {
+          live++;
+        }
+      }
+    }
+
+    // No new spawns during the 'stop' beat — that's the whole point.
+    if (ph.mode !== 'stop' && live < targetLive) {
+      let need = targetLive - live;
+      for (let i = 0; i < N && need > 0; i++) {
+        if (age[i] >= life[i]) {
+          spawn(i, t, false);
+          need--;
+        }
+      }
+    }
+
+    rebuildDensityGrid();
+  }
+
   function step(dt) {
+    if (opts.scenario === 'wormhole') return stepWormhole(dt);
     // Phase-driven spawn budget. We don't add particles; we recycle
     // dead ones. The fraction of "live" particles ramps over time.
     const phaseLiveFrac = Math.min(1.0, 0.10 + t * 0.05); // 10% → 100% over ~18s

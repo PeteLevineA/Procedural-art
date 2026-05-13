@@ -11,15 +11,18 @@ repo root:
 
 * **Homepage / gallery** — `index.html`
 * **Petrova Scope (immersive)** — `animations/petrova.html`
+* **Petrova Wormhole (immersive)** — `animations/petrova-wormhole.html`
 
 ## Project layout
 
 ```
 index.html                       Awwwards-style gallery homepage
 animations/petrova.html          Immersive standalone view of Petrova Scope
+animations/petrova-wormhole.html Immersive standalone view of Petrova Wormhole
 styles.css                       Shared styles + 3 breakpoints (mobile/desktop/4K)
 src/
   OLEDPetrovaParticles.js        Reusable WebGL2 particle component
+                                 (supports `scenario: 'scope' | 'wormhole'`)
   animations.js                  Animation registry (add new entries here)
   gallery.js                     Gallery controller (hover / scroll triggers)
 .nojekyll                        Tell GitHub Pages to skip Jekyll processing

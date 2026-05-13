@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>Petrova Wormhole — Procedural Particle Animation</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="immersive">
+  <!-- Full-screen hero container; the canvas is appended here. -->
+  <div id="stage" class="stage-full" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <div class="overlay">
+    <a class="back" href="../index.html">← All animations</a>
+    <div class="info">
+      <h1>Petrova Wormhole</h1>
+      <p>
+        A seven-phase ride on the same procedural OLED particle engine. A few
+        blue particles drift in inky black; a wave rises forward from the
+        bottom; the tunnel banks right, then left, then rushes straight at the
+        viewer until the screen is nearly white — and then it suddenly stops.
+        We land, and the last few particles dissipate slowly back to black.
+      </p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { getAnimation } from '../src/animations.js';
+    const entry = getAnimation('petrova-wormhole');
+    entry.mount(document.getElementById('stage'), { previewLoop: false });
+  </script>
+</body>
+</html>

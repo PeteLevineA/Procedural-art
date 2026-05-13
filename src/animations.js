@@ -60,8 +60,48 @@ export const animations = [
   },
 
   // ---- Future animations: add another entry here. ----
-  // Example skeleton:
-  //
+  {
+    id: 'petrova-wormhole',
+    title: 'Petrova Wormhole',
+    tagline: 'A roller-coaster ride through a blue particle tunnel, then inky black.',
+    description:
+      'A seven-phase choreography on the same OLED particle engine: a handful of ' +
+      'particles drift in mostly-black space, a wave rises forward from the bottom, ' +
+      'the tunnel banks right, then left, then rushes straight at the viewer until ' +
+      'the screen is almost white — and then it suddenly stops. We land, and the ' +
+      'last few particles dissipate slowly in random directions back to pure black. ' +
+      'Bluer palette than the Scope so OLED blacks stay truly inky between bursts.',
+    tags: ['WebGL2', 'Wormhole', 'Starfield', 'OLED'],
+    fullRoute: './animations/petrova-wormhole.html',
+    mount(container, { previewLoop = false } = {}) {
+      const isPreview = !!previewLoop;
+      return createOLEDPetrovaParticles(container, {
+        scenario       : 'wormhole',
+        // Fewer particles than the Scope: the opening phase is mostly
+        // black, and a lower ceiling keeps OLED blacks crisp through
+        // every phase except the peak rush.
+        particleCount  : isPreview ? 1500 : 3500,
+        speed          : isPreview ? 1.15 : 1.0,
+        bloomStrength  : 1.0,
+        clumpIntensity : 1.0,
+        densityRamp    : 1.0,
+        // Shift the whole palette toward blue. The "hot" core (used in
+        // the densest clusters) is blue-white instead of magenta-white
+        // so the climactic forward rush reads as cold and electric.
+        palette        : {
+          violet : [0.35, 0.30, 1.00],
+          blue   : [0.15, 0.45, 1.00],
+          cyan   : [0.20, 0.85, 1.00],
+          hot    : [0.65, 0.80, 1.00],
+        },
+        reducedMotion  : 'auto',
+        autoStart      : !isPreview,
+        previewLoop    : previewLoop,
+      });
+    },
+  },
+
+  // Example skeleton for future animations:
   // {
   //   id: 'aurora',
   //   title: 'Aurora Curtain',

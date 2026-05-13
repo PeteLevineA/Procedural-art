@@ -79,8 +79,11 @@ export const animations = [
       const isPreview = !!previewLoop;
       return createPatrovaWormhole(container, {
         // Lower particle count on gallery cards so multiple live
-        // canvases share the page comfortably.
-        particleCount       : isPreview ? 4500 : 12000,
+        // canvases share the page comfortably. Counts are slightly
+        // reduced from the original tuning because each particle now
+        // renders larger (with per-particle size jitter) — fewer
+        // particles read as denser, clumpier neon ribbons.
+        particleCount       : isPreview ? 3600 : 9000,
         tunnelRadius        : 6.0,
         speed               : isPreview ? 1.15 : 1.0,
         bloomStrength       : 1.0,

@@ -209,8 +209,8 @@ const DEFAULTS = {
   seed            : 1337,
   palette         : {
     violet : [0.55, 0.22, 1.00],
-    blue   : [0.25, 0.55, 1.00],
-    cyan   : [0.25, 0.95, 1.00],
+    blue   : [0.18, 0.55, 1.00], // electric, slightly deeper blue
+    cyan   : [0.20, 0.85, 1.00], // cyan still strongly blue-leaning
     hot    : [1.00, 0.55, 0.95], // magenta-white for plasma cores
   },
   // 'auto'  : detect prefers-reduced-motion → static frame
@@ -376,14 +376,16 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
   }
 
   // ----- Particle initialisation -----
-  // Random palette pick weighted toward violet/blue, occasional cyan.
+  // Random palette pick weighted toward blue (the particles are "alive"
+  // like the Petrova taumoeba in Project Hail Mary — predominantly
+  // electric blue), with violet and cyan as supporting bands.
   function pickPaletteColor(out, i) {
     // Use particle index so successive spawns vary deterministically.
     const r = ((i * 2654435761) >>> 0) / 0xFFFFFFFF;
     let c;
-    if (r < 0.45)      c = opts.palette.violet;
-    else if (r < 0.80) c = opts.palette.blue;
-    else               c = opts.palette.cyan;
+    if (r < 0.55)      c = opts.palette.blue;
+    else if (r < 0.80) c = opts.palette.cyan;
+    else               c = opts.palette.violet;
     out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
   }
 
@@ -682,6 +684,16 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
 
     // 1) advect live particles, age them, kill expired.
     let live = 0;
+    // Spatial+temporal sine wave parameters — gives the field a gentle,
+    // breathing, organic undulation on top of the curl-noise advection
+    // so particles read as "alive" (Project Hail Mary taumoeba) rather
+    // than purely turbulent. The wave is a function of x, y and t, with
+    // a per-particle phase so neighbouring particles don't lock-step.
+    const waveAmpY = 38 * opts.speed;     // px/sec vertical amplitude
+    const waveAmpX = 14 * opts.speed;     // small horizontal counter-wave
+    const waveFreqT = 1.35;               // cycles per second (time)
+    const waveFreqX = 0.0042;             // cycles per pixel (along x)
+    const waveFreqY = 0.0030;             // cycles per pixel (along y)
     for (let i = 0; i < N; i++) {
       if (age[i] < life[i]) {
         const [cx, cy] = curl(px[i], py[i], t);
@@ -691,8 +703,16 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
         // so foreground particles flow faster and farther.
         const curlMag = 220 * (0.4 + depth[i] * 0.8) * opts.speed;
         const drift   = -55 * (0.5 + depth[i] * 0.6) * opts.speed; // leftward
-        vx[i] = vx[i] * 0.92 + (cx * curlMag + drift) * dt * 8.0;
-        vy[i] = vy[i] * 0.92 + (cy * curlMag) * dt * 8.0;
+        // Sine-wave undulation. Phase is derived from the particle's
+        // jitter (a stable per-particle constant) so each one rides the
+        // wave at a slightly different offset, producing flowing,
+        // organic ribbons instead of a single coherent oscillation.
+        const phase = jitter[i] * 6.2831853;
+        const wavePhase = t * waveFreqT + px[i] * waveFreqX + py[i] * waveFreqY + phase;
+        const waveY = Math.sin(wavePhase) * waveAmpY * (0.4 + depth[i] * 0.8);
+        const waveX = Math.cos(wavePhase * 0.6) * waveAmpX * (0.4 + depth[i] * 0.8);
+        vx[i] = vx[i] * 0.92 + (cx * curlMag + drift + waveX) * dt * 8.0;
+        vy[i] = vy[i] * 0.92 + (cy * curlMag + waveY) * dt * 8.0;
         px[i] += vx[i] * dt;
         py[i] += vy[i] * dt;
         age[i] += dt;

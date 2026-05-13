@@ -87,7 +87,7 @@
  * ------------------------------------------------------------------- */
 const DEFAULTS = {
   /** How many particles populate the tube. Halo + core = 2 draws each. */
-  particleCount  : 12000,
+  particleCount  : 9000,
 
   /** Average radius of the tube in world units. */
   tunnelRadius   : 6.0,
@@ -491,9 +491,13 @@ void main() {
   vec2  perpDir   = vec2(-streakDir.y, streakDir.x);
 
   // Base sprite size scales with 1/anchorW so faraway particles look
-  // small. We also widen the halo by uSizeScale.
+  // small. We also widen the halo by uSizeScale. The per-particle
+  // sizeJitter (aTubeA.w) is multiplied in so individual particles
+  // vary in scale — producing the clumped "some bright, some small"
+  // look of the reference image instead of uniform pinpoints.
   float aspect = uViewport.x / max(uViewport.y, 1.0);
-  float baseSize = uSizeScale / max(anchorW, 0.5);
+  float sizeJitter = aTubeA.w;
+  float baseSize = uSizeScale * sizeJitter / max(anchorW, 0.5);
 
   // Streak quad: interpolate between the streak tail and head along
   // aCorner.x. The head is the current sample's screen position; the
@@ -755,17 +759,24 @@ export function createPatrovaWormhole(container, userOpts = {}) {
         const sOffset  = baseS + local * 1.6 + (hash(i, 7) - 0.5) * 0.4;
         const theta    = baseTheta + local * 0.18 + (hash(i, 8) - 0.5) * 0.12;
         const rJitter  = rGroup + (hash(i, 9) - 0.5) * 0.8;
-        const sizeJ    = 0.7 + hash(i, 10) * 0.7;
+        // Wide, skewed size distribution: most particles are small,
+        // but a long tail produces occasional large bright "clump"
+        // cores. Squaring the hash skews the mass toward small values,
+        // and adding a rare super-jitter bump (~5% of particles) gives
+        // the reference image's distinctive bright neon clusters.
+        const sJ0 = hash(i, 10);
+        const sJ1 = hash(i, 18);
+        let sizeJ = 0.55 + sJ0 * sJ0 * 2.0; // 0.55 .. ~2.55, heavy-tailed
+        if (sJ1 > 0.95) sizeJ *= 1.6;       // rare big "clump" particle
 
         const rotateRate = (hash(i, 12) - 0.5) * 0.18; // slow theta drift
         const phase      = hash(i, 13);
 
-        // Hot cores: rare overall, denser inside groups already flagged
-        // hot-prone. Combined with the additive halo this gives the
-        // white-hot pin-points in the reference image.
+        // Hot cores: small but slightly more frequent than before, so
+        // the densest clumps burn white-hot like the reference image.
         const hotRoll = hash(i, 14);
-        const hot = groupHotChance > 0.92 && hotRoll > 0.55 ? 1.0 :
-                    (hotRoll > 0.985 ? 0.85 : 0.0);
+        const hot = groupHotChance > 0.88 && hotRoll > 0.5 ? 1.0 :
+                    (hotRoll > 0.975 ? 0.85 : 0.0);
 
         tubeA[i*4+0] = sOffset;
         tubeA[i*4+1] = theta;
@@ -1079,12 +1090,12 @@ export function createPatrovaWormhole(container, userOpts = {}) {
 
     // Halo pass — wide, soft, low-alpha. Provides the bloom.
     gl.uniform1f(loc.uIsCorePass, 0.0);
-    gl.uniform1f(loc.uSizeScale,  0.16); // NDC
+    gl.uniform1f(loc.uSizeScale,  0.22); // NDC — bigger halos for clumpier feel
     gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, N);
 
     // Core pass — narrow, bright, crisp.
     gl.uniform1f(loc.uIsCorePass, 1.0);
-    gl.uniform1f(loc.uSizeScale,  0.038);
+    gl.uniform1f(loc.uSizeScale,  0.052);
     gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, N);
 
     gl.bindVertexArray(null);

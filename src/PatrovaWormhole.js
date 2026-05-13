@@ -86,16 +86,23 @@ const DEFAULTS = {
   speed          : 1.0,
 
   /**
-   * Phase durations in seconds. Sum is the full loop period. The fade
-   * phase ends in pure black so the loop boundary is invisible.
+   * Phase durations in seconds. Sum is the full loop period and is
+   * authored to total exactly 30s so the timeline reads as:
+   *   0– 6 s  slow entry
+   *   6–18 s  aggressive acceleration
+   *  18–25 s  peak-speed tunnel ride
+   *  25–28 s  sudden landing / deceleration
+   *  28–30 s  particles dissipate into black
+   * The fade phase ends in pure black so the loop boundary is invisible,
+   * and `hold` is zero — there is no inky pause padding the 30 s window.
    */
   speedRamp : {
-    launch  : 3.5,   // slow drift, sparse rise from bottom
-    accel   : 4.5,   // ramp toward peak; banking awakens
-    peak    : 4.5,   // dense neon ribbons whip past
-    landing : 1.6,   // sudden decel slam
-    fade    : 3.0,   // particles dissipate to OLED black
-    hold    : 0.6,   // brief inky pause before the next launch
+    launch  : 6.0,    // 0– 6 s : slow drift, sparse rise from bottom
+    accel   : 12.0,   // 6–18 s : aggressive ramp toward peak; banking awakens
+    peak    : 7.0,    // 18–25 s : dense neon ribbons whip past at peak velocity
+    landing : 3.0,    // 25–28 s : sudden decel slam; new spawns suppressed
+    fade    : 2.0,    // 28–30 s : remaining particles dissipate to OLED black
+    hold    : 0.0,    // no pause — fade lands exactly at 30 s
   },
 
   /** Overall bloom/halo brightness multiplier. */
@@ -754,54 +761,59 @@ export function createPatrovaWormhole(container, userOpts = {}) {
     let speed, streak, alive, density, bank;
 
     if (t < T_LAUNCH) {
-      // Phase 1: slow launch.
+      // Phase 1: slow entry (0–6 s). Start sparse and mostly black; the
+      // corridor is just a hint of structure with a few scattered neons.
       const u = t / Math.max(0.0001, T_LAUNCH);
       const e = smoothstep(0.0, 1.0, u);
-      speed   = 0.8 + e * 4.5;
-      streak  = 0.05 + e * 0.10;
-      alive   = 0.55 + e * 0.25;
-      density = 0.45 + e * 0.35;
-      bank    = e * 0.25; // very gentle
+      speed   = 0.6 + e * 4.7;
+      streak  = 0.04 + e * 0.11;
+      alive   = 0.20 + e * 0.55;   // open in near-black, brighten gently
+      density = 0.18 + e * 0.55;   // very few visible particles at t=0
+      bank    = e * 0.25;          // very gentle
     } else if (t < T_ACCEL) {
-      // Phase 2: aggressive ramp.
+      // Phase 2: aggressive acceleration (6–18 s). Speed and density
+      // both ramp hard; banking awakens; streaks lengthen.
       const u = (t - T_LAUNCH) / Math.max(0.0001, ramp.accel);
       const e = smoothstep(0.0, 1.0, u);
       speed   = 5.3 + e * (peakSpeed - 5.3);
-      streak  = 0.15 + e * 0.55;
-      alive   = 0.80 + e * 0.20;
-      density = 0.80 + e * 0.20;
-      bank    = 0.25 + e * 0.75; // banking awakens
+      streak  = 0.15 + e * 0.60;
+      alive   = 0.75 + e * 0.25;
+      density = 0.73 + e * 0.27;
+      bank    = 0.25 + e * 0.75;
     } else if (t < T_PEAK) {
-      // Phase 3: peak velocity.
+      // Phase 3: peak-speed tunnel ride (18–25 s). Dense neon storm.
       const u = (t - T_ACCEL) / Math.max(0.0001, ramp.peak);
-      // Hold near peak with a little wobble in bank for "rollercoaster".
       speed   = peakSpeed * (0.95 + 0.05 * Math.sin(u * 5.0));
-      streak  = 0.75;
+      streak  = 0.78;
       alive   = 1.0;
       density = 1.0;
       bank    = 1.0 + 0.5 * Math.sin(u * 3.1);
     } else if (t < T_LAND) {
-      // Phase 4: sudden landing slam.
+      // Phase 4: sudden landing slam (25–28 s). Stop spawning new
+      // particles — density falls quickly — while existing streaks
+      // decelerate. Quintic falloff makes the stop feel violent.
       const u = (t - T_PEAK) / Math.max(0.0001, ramp.landing);
       const e = smoothstep(0.0, 1.0, u);
-      // Quintic falloff makes the stop feel violent at the end.
       const eFast = 1 - Math.pow(1 - e, 5);
       speed   = peakSpeed * (1 - eFast);
-      streak  = 0.75 * (1 - eFast);
-      alive   = 1.0;
-      density = 1.0 - 0.3 * e;
+      streak  = 0.78 * (1 - eFast);
+      alive   = 1.0 - 0.25 * e;
+      density = 1.0 - 0.85 * e;    // no new spawns as we land
       bank    = (1.0 - e) * (1.0 + 0.5 * Math.sin(u * 3.1));
     } else if (t < T_FADE) {
-      // Phase 5: dissipate to black.
+      // Phase 5: dissipate to black (28–30 s). No forward motion; the
+      // remaining particles fade out into pure OLED black.
       const u = (t - T_LAND) / Math.max(0.0001, ramp.fade);
       const e = smoothstep(0.0, 1.0, u);
-      speed   = 0.8 * (1 - e);
-      streak  = 0.05 * (1 - e);
-      alive   = (1 - e) * 0.7; // a few fading sparks
-      density = 0.5 * (1 - e);
+      speed   = 0.4 * (1 - e);
+      streak  = 0.04 * (1 - e);
+      alive   = (1 - e) * 0.6;
+      density = 0.15 * (1 - e);
       bank    = 0.0;
     } else {
-      // Brief inky pause before the loop restarts.
+      // Safety branch: with the default 30 s ramp `hold` is 0 so this
+      // is unreachable, but a non-zero `hold` override would land here
+      // as a fully black pause before the loop restarts.
       speed = 0.0; streak = 0.0; alive = 0.0; density = 0.0; bank = 0.0;
     }
 

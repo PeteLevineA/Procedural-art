@@ -404,10 +404,10 @@ void main() {
   // aCorner.y ∈ [-1, +1] is the *across-streak* axis.
   vec2 offset = streakDir * (aCorner.x * (baseSize + streakAmt))
               + perpDir   * (aCorner.y * baseSize);
-  // Correct for non-square viewport: scale x in NDC by 1/aspect so
-  // sprites stay circular. (Streak length is in NDC; keep as-is.)
-  offset.x /= 1.0;
-  offset.y *= aspect; // anisotropic correction — keeps the across-streak axis circular
+  // Anisotropic correction so the *across-streak* axis stays circular
+  // in pixels regardless of viewport aspect. The along-streak axis is
+  // intentionally left in NDC so streak lengths read consistently.
+  offset.y *= aspect;
 
   vec2 finalNDC = ndc + offset;
   gl_Position = vec4(finalNDC * clip.w, clip.z, clip.w);
@@ -877,7 +877,6 @@ export function createPatrovaWormhole(container, userOpts = {}) {
     const ph = phase(t);
 
     cameraSPrev = cameraS;
-    bankPrev    = (typeof bankPrev === 'number') ? bankPrev : ph.bank;
     cameraS    += ph.speed * effectiveDt;
 
     render(ph);

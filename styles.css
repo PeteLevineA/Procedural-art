@@ -2,7 +2,7 @@
  * styles.css — shared styles for the gallery homepage and the
  * standalone animation pages.
  *
- * Three responsive checkpoints, exactly as requested:
+ * Three responsive breakpoints, exactly as requested:
  *   - Mobile   : default styles, then refined for                  <  768px
  *   - Desktop  : (min-width:  768px) and (max-width: 2559px)
  *   - 4K / TV  : (min-width: 2560px)

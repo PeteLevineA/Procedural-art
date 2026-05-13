@@ -92,7 +92,7 @@ immersive standalone page, where the animation plays in full (no loop).
 
 ## CSS breakpoints
 
-Three checkpoints, exactly as the brief asks:
+Three breakpoints, exactly as the brief asks:
 
 | Range                                | Target           |
 |--------------------------------------|------------------|

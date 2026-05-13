@@ -220,6 +220,15 @@ const DEFAULTS = {
   reducedMotion   : 'auto',
   // Internal upper bound on dt to avoid huge jumps when tab is hidden.
   maxDeltaSeconds : 1 / 30,
+  // If true (default), the animation begins playing as soon as it is
+  // mounted. Set false when used as a gallery preview that should wait
+  // for an external trigger (hover / scroll into view).
+  autoStart       : true,
+  // Preview-loop mode for gallery thumbnails. When set to a truthy
+  // object like { durationSeconds: 3 }, the simulation re-seeds itself
+  // every N seconds so the opening phase of the animation plays in a
+  // tight, modular loop. Set to `false` (default) for full playback.
+  previewLoop     : false,
 };
 
 /**
@@ -258,10 +267,14 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
   if (!gl) {
     // Graceful fallback: leave a pure-black canvas. Still procedural.
     canvas.style.background = '#000';
+    const noop = () => {};
     return {
       canvas,
-      destroy() { container.removeChild(canvas); },
-      setOption() {},
+      destroy() { try { container.removeChild(canvas); } catch (_) {} },
+      setOption: noop,
+      start: noop,
+      stop: noop,
+      reset: noop,
     };
   }
 
@@ -588,6 +601,23 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
     if (mode === 'slow') dt *= 0.1;
 
     t += dt;
+
+    // Preview-loop: when configured, re-seed the simulation every
+    // `durationSeconds` so gallery thumbnails play a tight, modular
+    // loop of the opening phase. The reset is visually soft because
+    // `initParticles()` skews most particles to start near the end
+    // of their lifetime, fading out gracefully while fresh ones
+    // begin streaming in from the right.
+    if (opts.previewLoop) {
+      const dur = (typeof opts.previewLoop === 'object'
+        ? opts.previewLoop.durationSeconds
+        : 3) || 3;
+      if (t >= dur) {
+        t = 0;
+        initParticles();
+      }
+    }
+
     step(dt);
     writeBuffersAndDraw();
     rafId = requestAnimationFrame(frame);
@@ -601,7 +631,14 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
     writeBuffersAndDraw();
   }
 
+  // `wantsRunning` tracks the caller's intent (autoStart, .start(), .stop()).
+  // The internal `running` flag may be temporarily false (e.g. when the tab
+  // is hidden) without changing the caller's intent. This lets us correctly
+  // resume on visibilitychange only if the caller actually wanted playback.
+  let wantsRunning = false;
+
   function start() {
+    wantsRunning = true;
     if (running) return;
     const mode = effectiveMotionMode();
     if (mode === 'static') {
@@ -613,6 +650,11 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
     rafId = requestAnimationFrame(frame);
   }
   function stop() {
+    wantsRunning = false;
+    _suspend();
+  }
+  // Internal pause that does not clear the caller's intent.
+  function _suspend() {
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
     rafId = 0;
@@ -620,27 +662,52 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
 
   // Pause when the tab is hidden — saves battery and avoids huge dt spikes.
   function onVis() {
-    if (document.hidden) stop();
-    else start();
+    if (document.hidden) {
+      _suspend();
+    } else if (wantsRunning) {
+      // Mirror start() without flipping intent.
+      const mode = effectiveMotionMode();
+      if (mode === 'static') { renderStaticFrame(); return; }
+      running = true;
+      lastWall = 0;
+      rafId = requestAnimationFrame(frame);
+    }
   }
   document.addEventListener('visibilitychange', onVis);
 
   // React to changes in the prefers-reduced-motion media query.
   if (mql && mql.addEventListener) {
-    mql.addEventListener('change', () => { stop(); start(); });
+    mql.addEventListener('change', () => {
+      const was = wantsRunning;
+      _suspend();
+      if (was) start();
+    });
   }
 
-  start();
+  if (opts.autoStart) start();
 
   return {
     canvas,
+    /** Begin (or resume) playback. Idempotent. */
+    start,
+    /** Pause playback. The next call to start() resumes from the current state. */
+    stop,
+    /**
+     * Reset the simulation back to t=0. Useful for a "play from the top"
+     * trigger on a gallery card. Safe to call while running or stopped.
+     */
+    reset() {
+      t = 0;
+      initParticles();
+    },
     /**
      * Update a config option at runtime. Some options (particleCount,
      * seed) require a full reset; others take effect on the next frame.
      */
     setOption(key, value) {
       if (key === 'particleCount') {
-        stop();
+        const wasRunning = wantsRunning;
+        _suspend();
         N = Math.max(64, value | 0);
         px = new Float32Array(N); py = new Float32Array(N);
         vx = new Float32Array(N); vy = new Float32Array(N);
@@ -650,7 +717,7 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
         cpuBuffer = new Float32Array(N * STRIDE_FLOATS);
         opts.particleCount = N;
         initParticles();
-        start();
+        if (wasRunning) start();
       } else if (key === 'palette') {
         opts.palette = { ...opts.palette, ...(value || {}) };
       } else if (key in opts) {

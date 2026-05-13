@@ -4,100 +4,47 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <title>Petrova Scope — Procedural Particle Animation</title>
-  <style>
-    /* OLED-first: every surface defaults to pure black so the additive
-       particle field is the only light source on the page. */
-    :root { color-scheme: dark; }
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #000;
-      color: #cfd8ff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
-                   "Helvetica Neue", Arial, sans-serif;
-      overflow: hidden;
-    }
-    #hero {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      background: #000;
-    }
-    /* Foreground content sits above the animation. Kept minimal so the
-       hero remains an animation, not a decoration behind a UI. */
-    .overlay {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      padding: clamp(16px, 4vw, 48px);
-      pointer-events: none;
-      z-index: 2;
-    }
-    .overlay h1 {
-      margin: 0 0 8px 0;
-      font-weight: 300;
-      letter-spacing: 0.18em;
-      font-size: clamp(18px, 2.4vw, 28px);
-      text-transform: uppercase;
-      color: #e6e9ff;
-      text-shadow: 0 0 24px rgba(140, 90, 255, 0.35);
-    }
-    .overlay p {
-      margin: 0;
-      max-width: 56ch;
-      font-size: clamp(12px, 1.2vw, 14px);
-      line-height: 1.5;
-      color: #9fb0e8;
-      opacity: 0.75;
-    }
-    /* Very subtle vignette for older OLED panels with edge bloom — the
-       center stays absolute black, only the corners darken further. */
-    .vignette {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 1;
-      background: radial-gradient(120% 80% at 50% 50%,
-                                  rgba(0,0,0,0) 55%,
-                                  rgba(0,0,0,0.55) 100%);
-    }
-  </style>
+  <title>Procedural Art — A showcase of 100% procedural web animations</title>
+  <meta name="description"
+        content="A growing collection of 100% procedural, OLED-friendly web animations. No images, no sprites — every pixel is generated at runtime." />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <!-- Full-screen hero container; the animation canvas is appended here. -->
-  <div id="hero" aria-hidden="true"></div>
-  <div class="vignette" aria-hidden="true"></div>
+  <header class="topbar">
+    <div class="topbar__brand">
+      <span class="dot" aria-hidden="true"></span>
+      Procedural Art
+    </div>
+    <div class="topbar__meta">
+      A showcase · pure black · no rasters
+    </div>
+  </header>
 
-  <div class="overlay">
-    <h1>Petrova Scope</h1>
-    <p>
-      A 100% procedural OLED particle field — ultraviolet, electric blue and cyan
-      charged particles flowing through a curl-noise turbulence into luminous
-      plasma clusters. No images, no sprites, no pre-rendered assets.
+  <section class="intro">
+    <p class="intro__eyebrow">Collection · 2026 →</p>
+    <h1 class="intro__title">
+      One hundred percent procedural. <em>Zero pixels of paint.</em>
+    </h1>
+    <p class="intro__lede">
+      Each piece below is generated entirely at runtime — no images, no sprites,
+      no pre-rendered video. Hover a banner (or scroll it into view on mobile)
+      to watch the opening three seconds of the animation, then dive in for the
+      full performance.
     </p>
-  </div>
+  </section>
+
+  <main id="gallery" class="gallery" aria-label="Animation showcase"></main>
+
+  <footer class="foot">
+    <div>© Procedural Art</div>
+    <div>
+      <a href="https://github.com/PeteLevineA/Procedural-art" rel="noopener">View source on GitHub</a>
+    </div>
+  </footer>
 
   <script type="module">
-    import { createOLEDPetrovaParticles } from './src/OLEDPetrovaParticles.js';
-
-    // Sane defaults — the component picks an OLED-friendly look out of
-    // the box. Tweak any of these to taste; see README.md for what each
-    // parameter does.
-    createOLEDPetrovaParticles(document.getElementById('hero'), {
-      particleCount  : 6000,
-      speed          : 1.0,
-      bloomStrength  : 1.0,
-      clumpIntensity : 1.0,
-      densityRamp    : 1.0,
-      rightSpawnBias : 0.85,
-      reducedMotion  : 'auto',
-    });
+    import { buildGallery } from './src/gallery.js';
+    buildGallery(document.getElementById('gallery'));
   </script>
 </body>
 </html>

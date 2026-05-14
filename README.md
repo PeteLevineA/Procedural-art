@@ -115,10 +115,10 @@ the page reads correctly from across the room.
 | `particleCount`  | `6000`   | 2k–10k sweet spot on desktop; gallery cards use 2200. |
 | `speed`          | `1.0`    | Time multiplier for the simulation. |
 | `bloomStrength`  | `1.0`    | Scales the soft-halo additive pass. |
-| `clumpIntensity` | `1.0`    | Density → brightness + magenta-white core mix. |
+| `clumpIntensity` | `1.0`    | Density → brightness + white-hot core mix. |
 | `densityRamp`    | `1.0`    | Scales the local-density estimate. |
 | `rightSpawnBias` | `0.85`   | Initial fraction of new particles spawned at the right edge. |
-| `palette`        | violet / blue / cyan / hot magenta-white | Linear RGB triplets in 0..1. |
+| `palette`        | base crimson / low red / mid orange-red / high warm pink / hot white + red `halo` corona | Linear RGB triplets in 0..1. |
 | `seed`           | `1337`   | Seeds the deterministic noise permutation. |
 | `reducedMotion`  | `'auto'` | `auto` / `static` / `slow` / `off`. |
 | `autoStart`      | `true`   | Set `false` for gallery previews. |
@@ -128,8 +128,11 @@ the page reads correctly from across the room.
 
 * Every frame, particles are binned into a coarse 2D grid (~32 cells across).
 * For each particle we sum counts in its 3×3 neighbourhood → `density`.
-* `density` drives both `intensity` (multiplies color and alpha) and
-  `hotMix` (blends base ultraviolet/cyan toward magenta-white).
+* `density` drives both `intensity` (multiplies color and alpha) and a
+  5-stop color gradient (deep crimson → red → orange-red → warm pink →
+  white-hot nucleus). A separate halo bloom pass desaturates the core
+  colour onto a saturated red tint so every cluster carries a deep red
+  corona, even when its core has gone white.
 * On top of that, additive blending of soft Gaussian point-sprites
   *also* makes overlapping particles brighter automatically — additive
   accumulation of Gaussians *is* a kernel density estimate.

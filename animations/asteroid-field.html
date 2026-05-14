@@ -4,30 +4,30 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <title>Petrova Scope — Procedural Particle Animation</title>
+  <title>Asteroid Field — Procedural Particle Animation</title>
   <link rel="stylesheet" href="../styles.css" />
 </head>
 <body class="immersive">
-  <!-- Full-screen hero container; the canvas is appended here. -->
+  <!-- Full-screen hero container; the WebGL canvas is appended here. -->
   <div id="stage" class="stage-full" aria-hidden="true"></div>
   <div class="vignette" aria-hidden="true"></div>
 
   <div class="overlay">
     <a class="back" href="../index.html">← All animations</a>
     <div class="info">
-      <h1>Petrova Scope</h1>
+      <h1>Asteroid Field</h1>
       <p>
-        A 100% procedural OLED particle field — crimson astrophage particles flowing
-        through curl-noise turbulence, clumping into luminous plasma clusters that burn
-        white-hot at their cores with deep red coronas. Inspired by the Petrova Line in
-        <em>Project Hail Mary</em> by Andy Weir. No images, no sprites, no pre-rendered assets.
+        A 100% procedural OLED cartoon asteroid fly-through — tumbling black rocks
+        with neon UV outlines streak past the camera as a distant hot magenta and
+        electric-blue nebula drifts slowly into view. No images, no sprites, no
+        pre-rendered assets.
       </p>
     </div>
   </div>
 
   <script type="module">
     import { getAnimation } from '../src/animations.js';
-    const entry = getAnimation('petrova');
+    const entry = getAnimation('asteroid-field');
     entry.mount(document.getElementById('stage'), { previewLoop: false });
   </script>
 </body>

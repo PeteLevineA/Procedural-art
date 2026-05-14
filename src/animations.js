@@ -16,6 +16,7 @@
 
 import { createOLEDPetrovaParticles } from './OLEDPetrovaParticles.js';
 import { createPatrovaWormhole }     from './PatrovaWormhole.js';
+import { createAsteroidField }       from './AsteroidField.js';
 
 /**
  * @typedef {Object} AnimationEntry
@@ -34,12 +35,13 @@ export const animations = [
   {
     id: 'petrova',
     title: 'Petrova Scope',
-    tagline: 'Ultraviolet plasma streams from the edge of an OLED black.',
+    tagline: 'Crimson astrophage particles burning white-hot in plasma clusters.',
     description:
-      'Charged ultraviolet, electric-blue and cyan particles approach from the right ' +
-      'edge of the screen, flowing through a curl-noise turbulence into luminous plasma ' +
-      'clusters. Pure black background, additive blending, zero raster assets — every ' +
-      'pixel is computed from a Gaussian falloff in the fragment shader.',
+      'Crimson astrophage particles drift in from the right edge of the screen, flowing ' +
+      'through a curl-noise turbulence and clumping into luminous plasma clusters that ' +
+      'burn white-hot at their cores with deep red coronas. Inspired by the Petrova Line ' +
+      'in Project Hail Mary. Pure OLED black background, additive blending, zero raster ' +
+      'assets — every pixel is computed from a Gaussian falloff in the fragment shader.',
     tags: ['WebGL2', 'Curl noise', 'Additive', 'OLED'],
     fullRoute: './animations/petrova.html',
     mount(container, { previewLoop = false } = {}) {
@@ -105,6 +107,34 @@ export const animations = [
         },
         reducedMotion : 'auto',
         autoStart     : !isPreview,
+        previewLoop   : previewLoop,
+      });
+    },
+  },
+
+  {
+    id: 'asteroid-field',
+    title: 'Asteroid Field',
+    tagline: 'Cartoon UV-lit rocks tumble past a hot magenta nebula.',
+    description:
+      'A first-person fly-through of a neon cartoon asteroid belt. Tumbling black ' +
+      'icosahedral rocks with neon-purple inverted-hull outlines streak past the ' +
+      'camera as a distant electric-blue and hot magenta nebula drifts slowly into ' +
+      'view. Every rock is a procedurally displaced icosahedron; the nebula is ' +
+      'layered radial gradients on a CanvasTexture. No images, no sprites, no ' +
+      'pre-rendered assets.',
+    tags: ['Three.js', '3D', 'Toon outline', 'OLED'],
+    fullRoute: './animations/asteroid-field.html',
+    mount(container, { previewLoop = false } = {}) {
+      const isPreview = !!previewLoop;
+      return createAsteroidField(container, {
+        // Smaller pool on the gallery card; the banner is tiny and we
+        // want to keep the per-card cost low when another canvas is
+        // already on the page.
+        asteroidCount : isPreview ? 36 : 80,
+        forwardSpeed  : isPreview ? 0.22 : 0.30,
+        nebulaApproach: isPreview ? 0.06 : 0.03,
+        autoStart     : !isPreview, // gallery cards wait for hover/scroll
         previewLoop   : previewLoop,
       });
     },

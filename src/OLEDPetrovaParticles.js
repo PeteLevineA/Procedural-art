@@ -2,10 +2,10 @@
  * OLEDPetrovaParticles
  * ---------------------------------------------------------------------
  * A 100% procedural, OLED-friendly particle animation inspired by the
- * activation of the Petrova Scope in Project Hail Mary: ultraviolet,
- * cyan and neon-purple particles approach from the right of the screen,
- * flowing through a turbulent curl-noise field, then gradually fill the
- * scene with luminous plasma clusters.
+ * Petrova Line in Project Hail Mary: crimson astrophage particles
+ * approach from the right of the screen, flowing through a turbulent
+ * curl-noise field, then gradually clump into luminous plasma clusters
+ * that burn white-hot at their cores with deep red coronas.
  *
  * Design notes (everything is procedural — no raster assets, no sprites):
  *
@@ -28,10 +28,10 @@
  *     For each particle we count occupants in its cell + 8 neighbours.
  *     This `density` value drives two visual signals:
  *       a) `intensity` — bright cores in dense regions, faint in voids.
- *       b) `hotMix`    — interpolates the particle's base ultraviolet/
- *                       cyan hue toward a hot magenta-white in the
- *                       densest clusters, mimicking optically-thick
- *                       plasma overlap.
+ *       b) a 5-stop color gradient — sparse particles stay deep crimson,
+ *          low clusters shift to red, medium to orange-red, high to a
+ *          warm pink, and the densest nucleus burns pure white, with a
+ *          saturated red corona painted by the halo pass.
  *
  *  3. Blending strategy
  *     ------------------
@@ -182,6 +182,14 @@ in vec3 v_color;
 in float v_alpha;
 out vec4 outColor;
 
+// u_haloRedBias: 0 = render the core color as-is (white-hot at the
+// nucleus); 1 = remap the per-particle intensity onto a saturated red
+// corona. Used by the soft bloom pass so that even when the core color
+// has been pushed to pure white in a dense cluster, the surrounding
+// halo paints a deep red gradient — the Petrova Line silhouette.
+uniform float u_haloRedBias;
+uniform vec3  u_haloTint;
+
 // Procedural soft-particle: radial Gaussian falloff. No texture lookup.
 void main() {
   vec2 d = gl_PointCoord - vec2(0.5);
@@ -189,7 +197,12 @@ void main() {
   if (r2 > 1.0) discard;
   // Gaussian-ish falloff — softer than 1-r and gives nicer bloom overlap.
   float g = exp(-r2 * 4.5);
-  vec3 col = v_color * g * v_alpha;
+  // Halo recolor: take the luminance of the core color and project it
+  // onto a saturated red tint. The halo therefore stays red even when
+  // the core color is white.
+  float lum = max(v_color.r, max(v_color.g, v_color.b));
+  vec3 haloCol = u_haloTint * lum;
+  vec3 col = mix(v_color, haloCol, u_haloRedBias) * g * v_alpha;
   // Additive blending: alpha channel is unused for color compositing,
   // but we set it to the same intensity so the framebuffer can be read
   // back consistently if needed.
@@ -207,11 +220,17 @@ const DEFAULTS = {
   densityRamp     : 1.0,
   rightSpawnBias  : 0.85, // initial; decays through the timeline
   seed            : 1337,
+  // Petrova Line palette: 5 density stops + a saturated red corona tint
+  // used by the halo bloom pass. The base/low/mid/high/hot stops are
+  // blended by per-particle local density so a particle smoothly walks
+  // from deep crimson (sparse) up to white-hot (peak nucleus).
   palette         : {
-    violet : [0.55, 0.22, 1.00],
-    blue   : [0.18, 0.55, 1.00], // electric, slightly deeper blue
-    cyan   : [0.20, 0.85, 1.00], // cyan still strongly blue-leaning
-    hot    : [1.00, 0.55, 0.95], // magenta-white for plasma cores
+    base : [0.545, 0.000, 0.000], // #8B0000 sparse particle (deep red)
+    low  : [0.800, 0.133, 0.000], // #CC2200 low cluster
+    mid  : [1.000, 0.267, 0.000], // #FF4400 medium cluster (orange-red)
+    high : [1.000, 0.533, 0.400], // #FF8866 high cluster (warm pink)
+    hot  : [1.000, 1.000, 1.000], // #FFFFFF peak / white-hot nucleus
+    halo : [1.000, 0.180, 0.000], // saturated red corona for bloom pass
   },
   // 'auto'  : detect prefers-reduced-motion → static frame
   // 'static': force a single static evolved frame
@@ -294,9 +313,11 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
   // ----- GL state -----
   const program = linkProgram(gl, VERT_SRC, FRAG_SRC);
   gl.useProgram(program);
-  const u_sizeMul  = gl.getUniformLocation(program, 'u_sizeMul');
-  const u_alphaMul = gl.getUniformLocation(program, 'u_alphaMul');
-  const u_dpr      = gl.getUniformLocation(program, 'u_dpr');
+  const u_sizeMul      = gl.getUniformLocation(program, 'u_sizeMul');
+  const u_alphaMul     = gl.getUniformLocation(program, 'u_alphaMul');
+  const u_dpr          = gl.getUniformLocation(program, 'u_dpr');
+  const u_haloRedBias  = gl.getUniformLocation(program, 'u_haloRedBias');
+  const u_haloTint     = gl.getUniformLocation(program, 'u_haloTint');
 
   // Interleaved buffer layout: vec2 pos | vec3 color | vec2 sizeAlpha = 7 floats.
   const STRIDE_FLOATS = 7;
@@ -376,17 +397,35 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
   }
 
   // ----- Particle initialisation -----
-  // Random palette pick weighted toward blue (the particles are "alive"
-  // like the Petrova taumoeba in Project Hail Mary — predominantly
-  // electric blue), with violet and cyan as supporting bands.
+  // Petrova astrophage particles are "alive" — each one picks a deep
+  // crimson tone within hsl(0, 90%, 28%) → hsl(10, 100%, 45%), plus a
+  // ±8° hue jitter so the field reads organic rather than uniform.
+  // The picker is deterministic in the particle index so reseeded
+  // simulations come out the same.
+  function _hslToRgb(h, s, l, out) {
+    h = (((h % 360) + 360) % 360) / 60;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if      (h < 1) { r = c; g = x; }
+    else if (h < 2) { r = x; g = c; }
+    else if (h < 3) { g = c; b = x; }
+    else if (h < 4) { g = x; b = c; }
+    else if (h < 5) { r = x; b = c; }
+    else            { r = c; b = x; }
+    const m = l - c / 2;
+    out[0] = r + m; out[1] = g + m; out[2] = b + m;
+  }
   function pickPaletteColor(out, i) {
-    // Use particle index so successive spawns vary deterministically.
-    const r = ((i * 2654435761) >>> 0) / 0xFFFFFFFF;
-    let c;
-    if (r < 0.55)      c = opts.palette.blue;
-    else if (r < 0.80) c = opts.palette.cyan;
-    else               c = opts.palette.violet;
-    out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
+    // Two independent hashes from the particle index for hue / lightness.
+    const r1 = ((i * 2654435761) >>> 0) / 0xFFFFFFFF;
+    const r2 = ((i * 40503 + 0x9E3779B9) >>> 0) / 0xFFFFFFFF;
+    const hueBase = r1 * 10;            // 0..10°  (red → red-orange)
+    const hueJit  = (r2 - 0.5) * 16;    // ±8° jitter
+    const hue = hueBase + hueJit;
+    const sat = 0.90 + r1 * 0.10;       // 0.90..1.00
+    const light = 0.28 + r2 * 0.17;     // 0.28..0.45
+    _hslToRgb(hue, sat, light, out);
   }
 
   // Shared scratch buffer for pickPaletteColor — used by both spawn paths.
@@ -760,13 +799,42 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
       // Intensity rises with density (capped). Sparse particles glow
       // faintly; clumps blaze.
       const intensity = Math.min(2.0, 0.35 + dens * 0.9 * opts.clumpIntensity);
-      // hotMix: 0 → pure base color, 1 → magenta-white plasma core.
-      const hotMix = Math.min(1.0, Math.max(0, dens - 0.6) * 0.9 * opts.clumpIntensity);
 
-      const hot = opts.palette.hot;
-      const r = baseR[i] * (1 - hotMix) + hot[0] * hotMix;
-      const g = baseG[i] * (1 - hotMix) + hot[1] * hotMix;
-      const b = baseB[i] * (1 - hotMix) + hot[2] * hotMix;
+      // 5-stop Petrova Line gradient driven by local cluster density.
+      // The particle's own jittered crimson is the stage-0 stop so
+      // sparse particles read as organically-coloured rather than all
+      // sharing one flat red.
+      //   stage <= 0.25  : per-particle base       → palette.low
+      //   stage <= 0.50  : palette.low             → palette.mid
+      //   stage <= 0.75  : palette.mid             → palette.high
+      //   stage <= 1.00  : palette.high            → palette.hot (white)
+      const stage = Math.min(1.0, Math.max(0, (dens - 0.05) * 0.75 * opts.clumpIntensity));
+      let r, g, b;
+      if (stage < 0.25) {
+        const u = stage * 4;
+        const s1 = opts.palette.low;
+        r = baseR[i] * (1 - u) + s1[0] * u;
+        g = baseG[i] * (1 - u) + s1[1] * u;
+        b = baseB[i] * (1 - u) + s1[2] * u;
+      } else if (stage < 0.50) {
+        const u = (stage - 0.25) * 4;
+        const s0 = opts.palette.low, s1 = opts.palette.mid;
+        r = s0[0] * (1 - u) + s1[0] * u;
+        g = s0[1] * (1 - u) + s1[1] * u;
+        b = s0[2] * (1 - u) + s1[2] * u;
+      } else if (stage < 0.75) {
+        const u = (stage - 0.50) * 4;
+        const s0 = opts.palette.mid, s1 = opts.palette.high;
+        r = s0[0] * (1 - u) + s1[0] * u;
+        g = s0[1] * (1 - u) + s1[1] * u;
+        b = s0[2] * (1 - u) + s1[2] * u;
+      } else {
+        const u = (stage - 0.75) * 4;
+        const s0 = opts.palette.high, s1 = opts.palette.hot;
+        r = s0[0] * (1 - u) + s1[0] * u;
+        g = s0[1] * (1 - u) + s1[1] * u;
+        b = s0[2] * (1 - u) + s1[2] * u;
+      }
 
       // Fade-in/out over lifetime so respawns don't pop.
       const a = age[i] / life[i];
@@ -801,14 +869,24 @@ export function createOLEDPetrovaParticles(container, userOptions = {}) {
     gl.useProgram(program);
     gl.uniform1f(u_dpr, DPR);
 
-    // Pass A: soft halo (big, dim). This is the procedural bloom.
-    gl.uniform1f(u_sizeMul, 6.5 * opts.bloomStrength);
-    gl.uniform1f(u_alphaMul, 0.18 * opts.bloomStrength);
+    const halo = opts.palette.halo;
+
+    // Pass A: soft halo (big, dim). This is the procedural bloom AND
+    // the deep red corona around every cluster — the halo recolor
+    // (u_haloRedBias = 1) projects each particle's luminance onto the
+    // saturated red tint, so even particles that are white-hot at the
+    // core radiate a red glow at the edges of their Gaussian falloff.
+    gl.uniform3f(u_haloTint, halo[0], halo[1], halo[2]);
+    gl.uniform1f(u_haloRedBias, 1.0);
+    gl.uniform1f(u_sizeMul, 7.5 * opts.bloomStrength);
+    gl.uniform1f(u_alphaMul, 0.22 * opts.bloomStrength);
     gl.drawArrays(gl.POINTS, 0, aliveIdx);
 
     // Pass B: sharp core (small, bright). Resolves filaments and
-    // produces the bright pinpoint white-hot cluster cores when
-    // many overlap additively.
+    // produces the white-hot pinpoint at the heart of dense clusters
+    // when many overlap additively. No halo recolor here so the core
+    // keeps its real colour (deep red → white at peak density).
+    gl.uniform1f(u_haloRedBias, 0.0);
     gl.uniform1f(u_sizeMul, 1.0);
     gl.uniform1f(u_alphaMul, 1.0);
     gl.drawArrays(gl.POINTS, 0, aliveIdx);

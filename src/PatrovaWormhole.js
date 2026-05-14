@@ -124,7 +124,7 @@ const DEFAULTS = {
    * length. We allow streaks longer than the screen so particles that
    * physically whip past the camera draw streaks exiting the viewport.
    */
-  streakLength   : 1.40,
+  streakLength   : 1.85,
 
   /**
    * Colour palette. Each entry is linear RGB in 0..1. The renderer
@@ -365,7 +365,12 @@ vec3 particleWorldPos(float cameraS, float bank, float pAdvance, float tNow) {
   // Advect: as pAdvance grows, the particle's offset shrinks — it
   // is moving toward the camera along the spline. mod() recycles
   // particles that have gone too far behind back to the far end.
-  float sLocal = lo + mod((sOffset - pAdvance) - lo, sLen);
+  // Use a per-particle effective tube length so the recycle target
+  // (lo + perLen) varies per particle — otherwise every wrapping
+  // particle would re-materialise on exactly the same far plane,
+  // giving a visibly even "wall" of spawns at the far side.
+  float perLen = sLen + phase * sLen * 0.4; // sLen..sLen*1.4, randomised per particle
+  float sLocal = lo + mod((sOffset - pAdvance) - lo, perLen);
 
   float s = cameraS + sLocal;
 
@@ -1090,12 +1095,12 @@ export function createPatrovaWormhole(container, userOpts = {}) {
 
     // Halo pass — wide, soft, low-alpha. Provides the bloom.
     gl.uniform1f(loc.uIsCorePass, 0.0);
-    gl.uniform1f(loc.uSizeScale,  0.22); // NDC — bigger halos for clumpier feel
+    gl.uniform1f(loc.uSizeScale,  0.28); // NDC — bigger halos for clumpier feel
     gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, N);
 
     // Core pass — narrow, bright, crisp.
     gl.uniform1f(loc.uIsCorePass, 1.0);
-    gl.uniform1f(loc.uSizeScale,  0.052);
+    gl.uniform1f(loc.uSizeScale,  0.066);
     gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, N);
 
     gl.bindVertexArray(null);

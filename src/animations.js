@@ -115,14 +115,14 @@ export const animations = [
   {
     id: 'asteroid-field',
     title: 'Asteroid Field',
-    tagline: 'Cartoon UV-lit rocks tumble past a hot magenta nebula.',
+    tagline: 'Cartoon UV-lit rocks tumble past a stationary asteroid ring.',
     description:
       'A first-person fly-through of a neon cartoon asteroid belt. Tumbling black ' +
       'icosahedral rocks with neon-purple inverted-hull outlines streak past the ' +
-      'camera as a distant electric-blue and hot magenta nebula drifts slowly into ' +
-      'view. Every rock is a procedurally displaced icosahedron; the nebula is ' +
-      'layered radial gradients on a CanvasTexture. No images, no sprites, no ' +
-      'pre-rendered assets.',
+      'camera, while a second ring of asteroids sits motionless in the background ' +
+      'on the horizontal plane, each spinning on its own random axis. Every rock is ' +
+      'a procedurally displaced icosahedron. No images, no sprites, no pre-rendered ' +
+      'assets.',
     tags: ['Three.js', '3D', 'Toon outline', 'OLED'],
     fullRoute: './animations/asteroid-field.html',
     mount(container, { previewLoop = false } = {}) {
@@ -133,7 +133,7 @@ export const animations = [
         // already on the page.
         asteroidCount : isPreview ? 36 : 80,
         forwardSpeed  : isPreview ? 0.22 : 0.30,
-        nebulaApproach: isPreview ? 0.06 : 0.03,
+        ringAsteroidCount: isPreview ? 18 : 32,
         autoStart     : !isPreview, // gallery cards wait for hover/scroll
         previewLoop   : previewLoop,
       });

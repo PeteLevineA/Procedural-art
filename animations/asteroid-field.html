@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>Asteroid Field — Procedural Particle Animation</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="immersive">
+  <!-- Full-screen hero container; the WebGL canvas is appended here. -->
+  <div id="stage" class="stage-full" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <div class="overlay">
+    <a class="back" href="../index.html">← All animations</a>
+    <div class="info">
+      <h1>Asteroid Field</h1>
+      <p>
+        A 100% procedural OLED cartoon asteroid fly-through — tumbling black rocks
+        with neon UV outlines streak past the camera as a distant hot magenta and
+        electric-blue nebula drifts slowly into view. No images, no sprites, no
+        pre-rendered assets.
+      </p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { getAnimation } from '../src/animations.js';
+    const entry = getAnimation('asteroid-field');
+    entry.mount(document.getElementById('stage'), { previewLoop: false });
+  </script>
+</body>
+</html>

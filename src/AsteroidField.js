@@ -3,8 +3,10 @@
  * ---------------------------------------------------------------------
  * A 100% procedural, OLED-friendly first-person fly-through of a cartoon
  * neon asteroid field. Tumbling black icosahedral rocks with neon-purple
- * inverted-hull outlines streak past the camera against a far-off canvas
- * nebula built from layered additive radial gradients.
+ * inverted-hull outlines streak past the camera against a pure-black void.
+ * A second, stationary ring of asteroids sits on the horizontal plane in
+ * the background and stays centered on screen as the camera glides forward,
+ * with each ring rock spinning on its own random axis.
  *
  * Design notes (everything is procedural — no raster assets):
  *
@@ -33,20 +35,19 @@
  *       Mesh A — BackSide, 1.08× scale, neon-purple. Only back faces
  *                render, and the oversized hull pokes out around the
  *                silhouette of Mesh B as a uniform-thickness rim.
- *       Mesh B — FrontSide, 1.0× scale, pure black. Occludes the nebula
- *                and provides the silhouette the outline wraps.
+ *       Mesh B — FrontSide, 1.0× scale, pure black. Occludes anything
+ *                behind it and provides the silhouette the outline wraps.
  *     No fragment shader, no post-process, no EffectComposer.
  *
- *  4. Procedural nebula
- *     ------------------
- *     One 1024² offscreen canvas drawn at startup with three large
- *     additive radial gradients (neon blue / hot magenta / neon pink)
- *     plus a handful of thin elliptical deep-violet streaks for gas
- *     filaments. Uploaded as a single CanvasTexture mapped onto an
- *     800×600 PlaneGeometry. The plane lives at camera.z − 1200 and
- *     closes the gap by `nebulaApproach` units/frame, so it grows
- *     imperceptibly over a multi-minute fly-through without ever
- *     being overshot.
+ *  4. Background asteroid ring
+ *     ------------------------
+ *     A `ringAsteroidCount` pool of asteroids is arranged evenly around a
+ *     circle of radius `ringRadius` lying flat on the y=0 plane. The whole
+ *     ring lives in a Group that tracks the camera at a fixed offset
+ *     (`ringDistance` units ahead on Z) so the ring appears stationary in
+ *     the background, centered on screen. The ring itself never rotates;
+ *     each individual rock spins on its own random axis at its own
+ *     random angular velocity.
  *
  *  5. Field recycling
  *     ----------------
@@ -92,10 +93,12 @@ function loadThree() {
 const DEFAULTS = {
   asteroidCount   : 80,
   forwardSpeed    : 0.3,    // camera advance per 60fps-equivalent frame
-  nebulaApproach  : 0.03,   // nebula closes the gap by this much / frame
   outlineScale    : 1.08,   // inverted-hull oversize factor
   outlineColors   : [0xBB00FF, 0x9900FF, 0xDD00FF, 0x7700EE],
-  nebulaDistance  : 1200,   // initial camera→nebula gap (world units)
+  ringAsteroidCount: 32,    // rocks in the stationary background ring
+  ringRadius      : 260,    // ring radius on the horizontal plane (world units)
+  ringDistance    : 700,    // camera→ring gap, held constant each frame
+  ringScale       : 9,      // base scale of each ring asteroid
   reducedMotion   : 'auto', // 'auto' | 'static' | 'slow' | 'off'
   maxDeltaMs      : 50,     // clamp dt to avoid tab-resume jumps
   autoStart       : true,
@@ -178,70 +181,6 @@ function _buildImpl(container, opts, THREE) {
 
   const camera = new THREE.PerspectiveCamera(75, Math.max(vw() / vh(), 0.01), 0.1, 2000);
   camera.position.set(0, 0, 0);
-
-  // ----- Procedural nebula texture -----
-  function buildNebulaTexture() {
-    const c = document.createElement('canvas');
-    c.width = 1024; c.height = 1024;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, 1024, 1024);
-    ctx.globalCompositeOperation = 'lighter';
-
-    function blob(cx, cy, r, rgb) {
-      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-      g.addColorStop(0.00, `rgba(${rgb}, 0.95)`);
-      g.addColorStop(0.45, `rgba(${rgb}, 0.40)`);
-      g.addColorStop(1.00, `rgba(${rgb}, 0.00)`);
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    blob(400, 500, 350, '0, 170, 255');   // neon blue
-    blob(600, 400, 280, '255, 0, 204');   // hot magenta
-    blob(500, 600, 200, '255, 68, 170');  // neon pink
-
-    const streakCount = 7;
-    for (let i = 0; i < streakCount; i++) {
-      const cx = 150 + Math.random() * 700;
-      const cy = 150 + Math.random() * 700;
-      const rx = 160 + Math.random() * 220;
-      const ry = 18  + Math.random() * 28;
-      const ang = Math.random() * Math.PI;
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(ang);
-      ctx.scale(rx / ry, 1);
-      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, ry);
-      g.addColorStop(0.0, 'rgba(102, 0, 255, 0.55)');
-      g.addColorStop(1.0, 'rgba(102, 0, 255, 0.00)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(0, 0, ry, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    ctx.globalCompositeOperation = 'source-over';
-    const tex = new THREE.CanvasTexture(c);
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
-    tex.needsUpdate = true;
-    return tex;
-  }
-
-  const nebulaTex = buildNebulaTexture();
-  const nebulaMat = new THREE.MeshBasicMaterial({
-    map: nebulaTex,
-    transparent: true,
-    depthWrite: false,
-  });
-  const nebulaPlane = new THREE.Mesh(new THREE.PlaneGeometry(800, 600), nebulaMat);
-  nebulaPlane.position.set(0, 0, -opts.nebulaDistance);
-  nebulaPlane.renderOrder = -1; // draw first; asteroid silhouettes occlude on top
-  scene.add(nebulaPlane);
 
   // ----- Asteroid geometry (with shared-vertex displacement) -----
   function makeAsteroidGeometry() {
@@ -334,6 +273,43 @@ function _buildImpl(container, opts, THREE) {
   }
   initAsteroids();
 
+  // ----- Stationary background asteroid ring -----
+  // A ring of asteroids on the horizontal (y=0) plane that stays centered
+  // on screen in the distance. The Group itself does not rotate, but each
+  // member spins on its own random axis at its own random angular velocity.
+  const ringGroup = new THREE.Group();
+  ringGroup.position.set(0, 0, camera.position.z - opts.ringDistance);
+  scene.add(ringGroup);
+
+  const ringAsteroids = [];
+  function initRingAsteroids() {
+    const n = opts.ringAsteroidCount;
+    for (let i = 0; i < n; i++) {
+      const a = makeAsteroid();
+      const theta = (i / n) * Math.PI * 2;
+      // Light per-asteroid jitter on the ring keeps the spacing organic
+      // without breaking the overall circle.
+      const rJitter = 1 + (Math.random() - 0.5) * 0.08;
+      a.position.set(
+        Math.cos(theta) * opts.ringRadius * rJitter,
+        (Math.random() - 0.5) * 6, // tiny y-wobble so it doesn't read as a perfect disk
+        Math.sin(theta) * opts.ringRadius * rJitter
+      );
+      a.rotation.set(
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2
+      );
+      a.scale.setScalar(opts.ringScale * (0.7 + Math.random() * 0.6));
+      // Each ring asteroid gets its own random spin (ring stays put).
+      a.userData.driftX = 0;
+      a.userData.driftY = 0;
+      ringGroup.add(a);
+      ringAsteroids.push(a);
+    }
+  }
+  initRingAsteroids();
+
   // ----- Reduced-motion detection -----
   const mql = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   function effectiveMotionMode() {
@@ -344,7 +320,6 @@ function _buildImpl(container, opts, THREE) {
   }
 
   // ----- Animation loop -----
-  let nebulaApproachAccum = 0;
   let elapsedSeconds      = 0; // for previewLoop reset cadence
   const _qDelta = new THREE.Quaternion();
 
@@ -357,11 +332,12 @@ function _buildImpl(container, opts, THREE) {
     // 1) Camera glide.
     camera.position.z -= opts.forwardSpeed * step;
 
-    // 2) Nebula closes the gap imperceptibly.
-    nebulaApproachAccum += opts.nebulaApproach * step;
-    nebulaPlane.position.z = camera.position.z - opts.nebulaDistance + nebulaApproachAccum;
+    // 2) Keep the background ring stationary on screen by tracking the
+    //    camera at a constant Z offset. The ring's world Z follows the
+    //    camera, but its xz layout is unchanged so it reads as motionless.
+    ringGroup.position.z = camera.position.z - opts.ringDistance;
 
-    // 3) Update each asteroid.
+    // 3) Update each streaming asteroid.
     const recycleThreshold = camera.position.z + 30;
     for (let i = 0; i < asteroids.length; i++) {
       const a = asteroids[i];
@@ -374,6 +350,14 @@ function _buildImpl(container, opts, THREE) {
         rerandomize(a);
         placeAsteroid(a, false);
       }
+    }
+
+    // 4) Spin every ring asteroid on its own random axis.
+    for (let i = 0; i < ringAsteroids.length; i++) {
+      const a = ringAsteroids[i];
+      const ud = a.userData;
+      _qDelta.setFromAxisAngle(ud.rotationAxis, ud.angularVelocity * step);
+      a.quaternion.multiplyQuaternions(_qDelta, a.quaternion);
     }
 
     renderer.render(scene, camera);
@@ -437,9 +421,8 @@ function _buildImpl(container, opts, THREE) {
 
   function reset() {
     camera.position.set(0, 0, 0);
-    nebulaApproachAccum = 0;
     elapsedSeconds = 0;
-    nebulaPlane.position.z = camera.position.z - opts.nebulaDistance;
+    ringGroup.position.z = camera.position.z - opts.ringDistance;
     for (let i = 0; i < asteroids.length; i++) {
       rerandomize(asteroids[i]);
       placeAsteroid(asteroids[i], true);
@@ -496,10 +479,15 @@ function _buildImpl(container, opts, THREE) {
         scene.remove(asteroids[i]);
       }
       asteroids.length = 0;
-      nebulaPlane.geometry.dispose();
-      nebulaMat.dispose();
-      nebulaTex.dispose();
-      scene.remove(nebulaPlane);
+      for (let i = 0; i < ringAsteroids.length; i++) {
+        const ud = ringAsteroids[i].userData;
+        ud.geometry.dispose();
+        ud.outlineMat.dispose();
+        ud.fillMat.dispose();
+        ringGroup.remove(ringAsteroids[i]);
+      }
+      ringAsteroids.length = 0;
+      scene.remove(ringGroup);
       renderer.dispose();
       try { container.removeChild(canvas); } catch (_) {}
     },

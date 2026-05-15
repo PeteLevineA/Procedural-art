@@ -278,7 +278,7 @@ void main() {
       // We don't need the full sample function — just a brightness
       // estimate. Reuse fractalSample with a smaller cap by clamping
       // via a uniform replacement: cheaper to just call again.
-      // (uMaxIter is uniform; we cheat by passing a manually-loop here.)
+      // (uMaxIter is uniform; we cheat by manually unrolling here.)
       vec2 zz = q;
       vec2 cc = uJuliaC;
       float bn = -1.0;

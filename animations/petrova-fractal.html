@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>Petrova Fractal — Procedural OLED Fractal Animation</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body class="immersive">
+  <!-- Full-screen hero container; the WebGL canvas is appended here. -->
+  <div id="stage" class="stage-full" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <div class="overlay">
+    <a class="back" href="../index.html">← All animations</a>
+    <div class="info">
+      <h1>Petrova Fractal</h1>
+      <p>
+        A 100% procedural OLED fractal dive — pure GLSL escape-time math
+        rendered as a single fullscreen shader. The camera falls
+        logarithmically into a Julia-set boundary while the parameter
+        <em>c</em> slowly morphs, the plane gently rotates, and a
+        domain-warp term injects organic curl so the viewer feels they
+        are travelling deeper into recursive detail rather than merely
+        zooming in. Inky black voids, neon blue, neon purple and hot
+        magenta filaments, with white-hot peaks where structures pile
+        up. No images, sprites or pre-rendered assets.
+      </p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { getAnimation } from '../src/animations.js';
+    const entry = getAnimation('petrova-fractal');
+    entry.mount(document.getElementById('stage'), { previewLoop: false });
+  </script>
+</body>
+</html>

@@ -17,6 +17,7 @@
 import { createOLEDPetrovaParticles } from './OLEDPetrovaParticles.js';
 import { createPatrovaWormhole }     from './PatrovaWormhole.js';
 import { createAsteroidField }       from './AsteroidField.js';
+import { createPetrovaFractal }      from './PetrovaFractal.js';
 
 /**
  * @typedef {Object} AnimationEntry
@@ -136,6 +137,43 @@ export const animations = [
         ringAsteroidCount: isPreview ? 18 : 32,
         autoStart     : !isPreview, // gallery cards wait for hover/scroll
         previewLoop   : previewLoop,
+      });
+    },
+  },
+
+  {
+    id: 'petrova-fractal',
+    title: 'Petrova Fractal',
+    tagline: 'A hypnotic 30-second dive into a neon recursive Julia universe.',
+    description:
+      'A 100% procedural OLED fractal — pure GLSL escape-time math rendered ' +
+      'as a single fullscreen shader. The camera falls logarithmically into a ' +
+      'Julia-set boundary while the parameter c slowly morphs, the plane ' +
+      'gently rotates, and a domain-warp term injects organic curl so the ' +
+      'viewer feels they are travelling deeper into recursive detail rather ' +
+      'than merely zooming in. Three phases (intro / bridge / deep) ramp ' +
+      'iteration count, bloom and white-hot plasma intersections across an ' +
+      'exact 30-second timeline; the loop boundary is masked by a soft alive ' +
+      'fade so the dive feels infinite. Inky black voids, neon blue, neon ' +
+      'purple and hot magenta filaments, with white-hot peaks where ' +
+      'structures pile up. No images, sprites or pre-rendered assets.',
+    tags: ['WebGL2', 'GLSL', 'Fractal', 'OLED'],
+    fullRoute: './animations/petrova-fractal.html',
+    mount(container, { previewLoop = false } = {}) {
+      const isPreview = !!previewLoop;
+      return createPetrovaFractal(container, {
+        // Gallery cards run a slightly cheaper iteration cap to keep
+        // multiple live canvases comfortable on one page; the full
+        // immersive page uses the author-tuned count.
+        iterationCount  : isPreview ? 120 : 160,
+        zoomSpeed       : 0.16,
+        bloomIntensity  : isPreview ? 0.85 : 1.0,
+        glowIntensity   : 1.0,
+        recursionDensity: 1.0,
+        fractalType     : 'hybrid',
+        reducedMotion   : 'auto',
+        autoStart       : !isPreview,
+        previewLoop     : previewLoop,
       });
     },
   },
